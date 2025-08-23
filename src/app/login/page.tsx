@@ -30,7 +30,8 @@ export default function LoginPage() {
 
     try {
       const response = await login(formData.username, formData.password)
-      loginWithTokens(response.access, response.refresh, response.user)
+      // Only store tokens for now; fetch user later in the app
+      loginWithTokens(response.access, response.refresh)
       router.replace("/dashboard")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed")

@@ -87,81 +87,134 @@ export type QuizAttempt = {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "https://english-api.flavstudios.dev/api/v1"
 
-// Auth login function
-export async function login(username: string, password: string) {
-  const response = await fetch(`${API_BASE}/auth/login/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ username, password }),
-  })
+// --- helpers ---------------------------------------------------------------
 
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.detail || "Login failed")
+async function parseResponse<T>(res: Response): Promise<T> {
+  const text = await res.text()
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    // Non-JSON (e.g., HTML error page)
+    throw new Error(`${res.status} ${res.statusText}${text ? ` — ${text.slice(0, 140)}` : ""}`)
   }
-
-  return response.json()
 }
 
 // Generic API helper
 export async function api(path: string, init?: RequestInit) {
   const url = `${API_BASE}${path}`
-  const response = await fetch(url, {
+  const res = await fetch(url, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...init?.headers,
+      ...(init?.headers || {}),
     },
   })
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: "Request failed" }))
-    throw new Error(error.detail || `HTTP ${response.status}`)
+  if (!res.ok) {
+    await parseResponse<unknown>(res) // will throw with good message
+  }
+  // If OK but not JSON, parseResponse will still throw; your API should return JSON.
+  res.headers.get("content-type") // noop; for clarity
+  const text = await res.text()
+  return text ? JSON.parse(text) : null
+}
+
+// --- auth ------------------------------------------------------------------
+
+// JWT login (SimpleJWT): POST /auth/token/ -> { access, refresh }
+// Also tries to fetch /me/summary/ for user info.
+export async function login(username: string, password: string) {
+  const tokenRes = await fetch(`${API_BASE}/auth/token/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  })
+
+  if (!tokenRes.ok) {
+    await parseResponse<unknown>(tokenRes) // throws with readable error
   }
 
-  return response.json()
+  const tokens = await tokenRes.json() as { access: string; refresh: string }
+
+  // Optional: get user summary after login
+  let user: Partial<MeSummary> | undefined = undefined
+  try {
+    const meRes = await fetch(`${API_BASE}/me/summary/`, {
+      headers: { Authorization: `Bearer ${tokens.access}` },
+    })
+    if (meRes.ok) {
+      user = await meRes.json()
+    } else {
+      // not fatal
+    }
+  } catch {
+    // ignore network errors here
+  }
+
+  return { ...tokens, user }
 }
+
+// Refresh JWT
+export async function refresh(refreshToken: string) {
+  const res = await fetch(`${API_BASE}/auth/token/refresh/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh: refreshToken }),
+  })
+  if (!res.ok) {
+    await parseResponse<unknown>(res)
+  }
+  return (await res.json()) as { access: string }
+}
+
+// --- typed client ----------------------------------------------------------
 
 export const apiClient = {
   get: async (path: string, token?: string) => {
     return api(path, {
       method: "GET",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    })
   },
+
   post: async <T = unknown>(path: string, data: T, token?: string) => {
     return api(path, {
       method: "POST",
       body: JSON.stringify(data),
       headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    })
   },
+
   put: async <T = unknown>(path: string, data: T, token?: string) => {
     return api(path, {
       method: "PUT",
       body: JSON.stringify(data),
       headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    })
   },
+
   delete: async (path: string, token?: string) => {
     return api(path, {
       method: "DELETE",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    })
   },
 
+  // domain-specific helpers
   getLessonDetail: async (lessonId: number, token?: string): Promise<LessonDetail> => {
-    return apiClient.get(`/lessons/${lessonId}/`, token);
+    return apiClient.get(`/lessons/${lessonId}/`, token)
   },
 
   updateProgress: async (data: ProgressUpdate, token?: string): Promise<void> => {
-    return apiClient.post("/progress/", data, token);
+    return apiClient.post("/progress/", data, token)
   },
 
+  // Match your page code which posts to /quiz-attempts/
   submitQuizAttempt: async (data: QuizAttempt, token?: string): Promise<QuizAttemptResult> => {
-    return apiClient.post("/quiz/attempt/", data, token);
+    return apiClient.post("/quiz-attempts/", data, token)
   },
-};
 
+  getMeSummary: async (token: string): Promise<MeSummary> => {
+    return apiClient.get("/me/summary/", token)
+  },
+}

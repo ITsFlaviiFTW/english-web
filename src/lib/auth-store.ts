@@ -1,14 +1,15 @@
+// src/lib/auth-store.ts
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type User = {
-  id: number;
+  id: number;                 // <-- make optional
   username: string;
   email?: string;
   display_name?: string;
   avatar_url?: string;
-  xp?: number;        // add so Nav compiles
-  streak?: number;    // add so Nav compiles
+  xp?: number;
+  streak?: number;
 };
 
 interface AuthState {
