@@ -90,15 +90,22 @@ const API_BASE =
 
 // --- helpers ---------------------------------------------------------------
 
-async function parseResponse<T>(res: Response): Promise<T> {
-  const text = await res.text()
+async function throwErrorFromResponse(res: Response): Promise<never> {
+  const raw = await res.text()
   try {
-    return JSON.parse(text) as T
+    const data = raw ? JSON.parse(raw) : {}
+    let msg = ""
+
+    if (typeof data === "string") msg = data
+    else if (data.detail) msg = String(data.detail)
+    else if (data.non_field_errors) msg = (data.non_field_errors as string[]).join(" ")
+    else if (data.password) msg = Array.isArray(data.password) ? data.password.join(" ") : String(data.password)
+    else if (data.username) msg = Array.isArray(data.username) ? data.username.join(" ") : String(data.username)
+    else if (Object.keys(data).length) msg = JSON.stringify(data)
+
+    throw new Error(`${res.status} ${res.statusText}${msg ? ` — ${msg}` : ""}`)
   } catch {
-    // Non-JSON (e.g., HTML error page)
-    throw new Error(
-      `${res.status} ${res.statusText}${text ? ` — ${text.slice(0, 140)}` : ""}`
-    )
+    throw new Error(`${res.status} ${res.statusText}${raw ? ` — ${raw.slice(0, 140)}` : ""}`)
   }
 }
 
@@ -114,15 +121,14 @@ export async function api(path: string, init?: RequestInit) {
   })
 
   if (!res.ok) {
-    await parseResponse<unknown>(res) // will throw with good message
+    await throwErrorFromResponse(res) // always throws
   }
-  const text = await res.text()
-  return text ? JSON.parse(text) : null
+  const txt = await res.text()
+  return txt ? JSON.parse(txt) : null
 }
 
 // --- auth ------------------------------------------------------------------
 
-// Use your custom endpoint: POST /auth/login/ -> { access, refresh, user }
 export async function login(username: string, password: string) {
   const tokenRes = await fetch(`${API_BASE}/auth/login/`, {
     method: "POST",
@@ -131,7 +137,7 @@ export async function login(username: string, password: string) {
   })
 
   if (!tokenRes.ok) {
-    await parseResponse<unknown>(tokenRes)
+    await throwErrorFromResponse(tokenRes) // fix: don't call missing parseResponse
   }
 
   const payload = (await tokenRes.json()) as {
@@ -140,7 +146,6 @@ export async function login(username: string, password: string) {
     user?: Partial<MeSummary>
   }
 
-  // Optional: fetch /me/ for fresh user data
   let user: Partial<MeSummary> | undefined = payload.user
   try {
     const meRes = await fetch(`${API_BASE}/me/`, {
@@ -156,7 +161,6 @@ export async function login(username: string, password: string) {
   return { access: payload.access, refresh: payload.refresh, user }
 }
 
-// If you haven't wired SimpleJWT refresh URLs, don't call this yet.
 export async function refresh(refreshToken: string) {
   const res = await fetch(`${API_BASE}/auth/token/refresh/`, {
     method: "POST",
@@ -164,7 +168,7 @@ export async function refresh(refreshToken: string) {
     body: JSON.stringify({ refresh: refreshToken }),
   })
   if (!res.ok) {
-    await parseResponse<unknown>(res)
+    await throwErrorFromResponse(res) // fix: don't call missing parseResponse
   }
   return (await res.json()) as { access: string }
 }
@@ -202,7 +206,6 @@ export const apiClient = {
     })
   },
 
-  // domain-specific helpers
   getLessonDetail: async (lessonId: number, token?: string): Promise<LessonDetail> => {
     return apiClient.get(`/lessons/${lessonId}/`, token)
   },
@@ -215,7 +218,6 @@ export const apiClient = {
     return apiClient.post("/quiz-attempts/", data, token)
   },
 
-  // Your backend exposes GET /me/
   getMeSummary: async (token: string): Promise<Partial<MeSummary>> => {
     return apiClient.get("/me/", token)
   },
