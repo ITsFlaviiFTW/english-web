@@ -85,7 +85,8 @@ export type QuizAttempt = {
   }>
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "https://english-api.flavstudios.dev/api/v1"
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE || "https://english-api.flavstudios.dev/api/v1"
 
 // --- helpers ---------------------------------------------------------------
 
@@ -95,7 +96,9 @@ async function parseResponse<T>(res: Response): Promise<T> {
     return JSON.parse(text) as T
   } catch {
     // Non-JSON (e.g., HTML error page)
-    throw new Error(`${res.status} ${res.statusText}${text ? ` — ${text.slice(0, 140)}` : ""}`)
+    throw new Error(
+      `${res.status} ${res.statusText}${text ? ` — ${text.slice(0, 140)}` : ""}`
+    )
   }
 }
 
@@ -113,48 +116,47 @@ export async function api(path: string, init?: RequestInit) {
   if (!res.ok) {
     await parseResponse<unknown>(res) // will throw with good message
   }
-  // If OK but not JSON, parseResponse will still throw; your API should return JSON.
-  res.headers.get("content-type") // noop; for clarity
   const text = await res.text()
   return text ? JSON.parse(text) : null
 }
 
 // --- auth ------------------------------------------------------------------
 
-// JWT login (SimpleJWT): POST /auth/token/ -> { access, refresh }
-// Also tries to fetch /me/summary/ for user info.
+// Use your custom endpoint: POST /auth/login/ -> { access, refresh, user }
 export async function login(username: string, password: string) {
-  const tokenRes = await fetch(`${API_BASE}/auth/token/`, {
+  const tokenRes = await fetch(`${API_BASE}/auth/login/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   })
 
   if (!tokenRes.ok) {
-    await parseResponse<unknown>(tokenRes) // throws with readable error
+    await parseResponse<unknown>(tokenRes)
   }
 
-  const tokens = await tokenRes.json() as { access: string; refresh: string }
+  const payload = (await tokenRes.json()) as {
+    access: string
+    refresh: string
+    user?: Partial<MeSummary>
+  }
 
-  // Optional: get user summary after login
-  let user: Partial<MeSummary> | undefined = undefined
+  // Optional: fetch /me/ for fresh user data
+  let user: Partial<MeSummary> | undefined = payload.user
   try {
-    const meRes = await fetch(`${API_BASE}/me/summary/`, {
-      headers: { Authorization: `Bearer ${tokens.access}` },
+    const meRes = await fetch(`${API_BASE}/me/`, {
+      headers: { Authorization: `Bearer ${payload.access}` },
     })
     if (meRes.ok) {
       user = await meRes.json()
-    } else {
-      // not fatal
     }
   } catch {
-    // ignore network errors here
+    // ignore
   }
 
-  return { ...tokens, user }
+  return { access: payload.access, refresh: payload.refresh, user }
 }
 
-// Refresh JWT
+// If you haven't wired SimpleJWT refresh URLs, don't call this yet.
 export async function refresh(refreshToken: string) {
   const res = await fetch(`${API_BASE}/auth/token/refresh/`, {
     method: "POST",
@@ -209,12 +211,12 @@ export const apiClient = {
     return apiClient.post("/progress/", data, token)
   },
 
-  // Match your page code which posts to /quiz-attempts/
   submitQuizAttempt: async (data: QuizAttempt, token?: string): Promise<QuizAttemptResult> => {
     return apiClient.post("/quiz-attempts/", data, token)
   },
 
-  getMeSummary: async (token: string): Promise<MeSummary> => {
-    return apiClient.get("/me/summary/", token)
+  // Your backend exposes GET /me/
+  getMeSummary: async (token: string): Promise<Partial<MeSummary>> => {
+    return apiClient.get("/me/", token)
   },
 }
