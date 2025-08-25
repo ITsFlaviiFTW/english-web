@@ -29,18 +29,21 @@ export default function RegisterPage() {
   const [nonFieldError, setNonFieldError] = useState<string>("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
-  // Client-side password checks
+  // Client-side password checks: >=8 chars, >=1 uppercase, >=1 special char, and not similar to username
   const pwdChecks = useMemo<{
-    rules: { minLen: boolean; notAllDigits: boolean; notSimilarToUser: boolean };
-    allPass: boolean;
+    rules: { minLen: boolean; hasUpper: boolean; hasSpecial: boolean; notSimilarToUser: boolean };
+    requiredPass: boolean; // only minLen + hasUpper + hasSpecial
   }>(() => {
-    const rules = {
-      minLen: form.password.length >= 8,
-      notAllDigits: !/^\d+$/.test(form.password),
-      notSimilarToUser:
-        !!form.username && !form.password.toLowerCase().includes(form.username.toLowerCase()),
+    const minLen = form.password.length >= 8;
+    const hasUpper = /[A-Z]/.test(form.password);
+    const hasSpecial = /[^A-Za-z0-9]/.test(form.password);
+    const notSimilarToUser =
+      !!form.username && !form.password.toLowerCase().includes(form.username.toLowerCase());
+
+    return {
+      rules: { minLen, hasUpper, hasSpecial, notSimilarToUser },
+      requiredPass: minLen && hasUpper && hasSpecial,
     };
-    return { rules, allPass: Object.values(rules).every(Boolean) };
   }, [form.password, form.username]);
 
   async function onSubmit(e: React.FormEvent) {
@@ -50,6 +53,14 @@ export default function RegisterPage() {
 
     if (form.password !== form.confirm) {
       setFieldErrors((prev) => ({ ...prev, password: ["Passwords do not match."] }));
+      return;
+    }
+
+    if (!pwdChecks.requiredPass) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        password: ["Password must be at least 8 characters, include an uppercase letter and a special character."],
+      }));
       return;
     }
 
@@ -143,7 +154,7 @@ export default function RegisterPage() {
               "h-12 transition-colors",
               fieldErrors.password
                 ? "border-destructive focus-visible:ring-destructive"
-                : pwdChecks.allPass && form.password.length > 0
+                : pwdChecks.requiredPass && form.password.length > 0
                 ? "border-green-500 focus-visible:ring-green-500"
                 : ""
             )}
@@ -152,7 +163,8 @@ export default function RegisterPage() {
           {/* Live criteria */}
           <div className="mt-2 grid grid-cols-1 gap-1 text-sm">
             <Criteria ok={!!pwdChecks.rules.minLen} text="At least 8 characters" />
-            <Criteria ok={!!pwdChecks.rules.notAllDigits} text="Not all numbers" />
+            <Criteria ok={!!pwdChecks.rules.hasUpper} text="At least one uppercase letter" />
+            <Criteria ok={!!pwdChecks.rules.hasSpecial} text="At least one special character (!@#$%^&*)" />
             <Criteria ok={!!pwdChecks.rules.notSimilarToUser} text="Not too similar to username" />
           </div>
 
@@ -178,7 +190,7 @@ export default function RegisterPage() {
           />
         </div>
 
-        <Button type="submit" className="w-full h-12" disabled={loading}>
+        <Button type="submit" className="w-full h-12" disabled={loading || !pwdChecks.requiredPass}>
           {loading ? "Creating account..." : "Create Account"}
         </Button>
 

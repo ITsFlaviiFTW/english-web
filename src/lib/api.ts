@@ -153,7 +153,7 @@ export async function api(path: string, init?: RequestInit) {
   })
 
   if (!res.ok) {
-    await throwErrorFromResponse(res) // always throws
+    await throwErrorFromResponse(res)
   }
   const txt = await res.text()
   return txt ? JSON.parse(txt) : null
