@@ -90,23 +90,55 @@ const API_BASE =
 
 // --- helpers ---------------------------------------------------------------
 
+export class ApiError extends Error {
+  status: number
+  data: unknown
+  constructor(message: string, status: number, data: unknown) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+    this.data = data
+  }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+}
+function asStringArray(v: unknown): string[] | undefined {
+  return Array.isArray(v) && v.every((x) => typeof x === "string")
+    ? (v as string[])
+    : undefined
+}
+
 async function throwErrorFromResponse(res: Response): Promise<never> {
   const raw = await res.text()
+  let data: unknown = undefined
+  let msg = ""
+
   try {
-    const data = raw ? JSON.parse(raw) : {}
-    let msg = ""
+    data = raw ? JSON.parse(raw) : {}
+    if (typeof data === "string") {
+      msg = data
+    } else if (isRecord(data)) {
+      const detail = data.detail
+      const nfe = data.non_field_errors
+      const pw = data.password
+      const un = data.username
 
-    if (typeof data === "string") msg = data
-    else if (data.detail) msg = String(data.detail)
-    else if (data.non_field_errors) msg = (data.non_field_errors as string[]).join(" ")
-    else if (data.password) msg = Array.isArray(data.password) ? data.password.join(" ") : String(data.password)
-    else if (data.username) msg = Array.isArray(data.username) ? data.username.join(" ") : String(data.username)
-    else if (Object.keys(data).length) msg = JSON.stringify(data)
-
-    throw new Error(`${res.status} ${res.statusText}${msg ? ` — ${msg}` : ""}`)
+      if (typeof detail === "string") msg = detail
+      else if (asStringArray(nfe)) msg = asStringArray(nfe)!.join(" ")
+      else if (asStringArray(pw)) msg = asStringArray(pw)!.join(" ")
+      else if (asStringArray(un)) msg = asStringArray(un)!.join(" ")
+      else if (Object.keys(data).length) msg = JSON.stringify(data)
+    }
   } catch {
-    throw new Error(`${res.status} ${res.statusText}${raw ? ` — ${raw.slice(0, 140)}` : ""}`)
+    // fall through to raw snippet
   }
+
+  const final = `${res.status} ${res.statusText}${
+    msg ? ` — ${msg}` : raw ? ` — ${raw.slice(0, 140)}` : ""
+  }`
+  throw new ApiError(final, res.status, data)
 }
 
 // Generic API helper
@@ -137,7 +169,7 @@ export async function login(username: string, password: string) {
   })
 
   if (!tokenRes.ok) {
-    await throwErrorFromResponse(tokenRes) // fix: don't call missing parseResponse
+    await throwErrorFromResponse(tokenRes)
   }
 
   const payload = (await tokenRes.json()) as {
@@ -168,7 +200,7 @@ export async function refresh(refreshToken: string) {
     body: JSON.stringify({ refresh: refreshToken }),
   })
   if (!res.ok) {
-    await throwErrorFromResponse(res) // fix: don't call missing parseResponse
+    await throwErrorFromResponse(res)
   }
   return (await res.json()) as { access: string }
 }
