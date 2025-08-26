@@ -1,9 +1,32 @@
+"use client"
+
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
+import { useAuth } from "@/lib/auth-store"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BookOpen, Users, Trophy, Zap } from "lucide-react"
 
 export default function HomePage() {
+  const router = useRouter()
+  const { hydrated, isAuthenticated } = useAuth()
+
+  useEffect(() => {
+    if (hydrated && isAuthenticated) {
+      router.replace("/dashboard")
+    }
+  }, [hydrated, isAuthenticated, router])
+
+  // Optional: while store hydrates, show nothing (avoid flash)
+  if (!hydrated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen">
       {/* Hero Section */}

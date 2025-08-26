@@ -46,6 +46,16 @@ export type MeSummary = {
   avatar_url?: string
 }
 
+// added to work with the userserializer
+export type ApiUser = {
+  id: number
+  username: string
+  email?: string
+  display_name?: string
+  avatar_url?: string
+}
+
+
 export type Quiz = {
   id: number
   user_id: number
@@ -167,24 +177,21 @@ export async function login(username: string, password: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   })
-
-  if (!tokenRes.ok) {
-    await throwErrorFromResponse(tokenRes)
-  }
+  if (!tokenRes.ok) await throwErrorFromResponse(tokenRes)
 
   const payload = (await tokenRes.json()) as {
     access: string
     refresh: string
-    user?: Partial<MeSummary>
+    user?: ApiUser            // <-- was Partial<MeSummary>
   }
 
-  let user: Partial<MeSummary> | undefined = payload.user
+  let user: ApiUser | undefined = payload.user
   try {
     const meRes = await fetch(`${API_BASE}/me/`, {
       headers: { Authorization: `Bearer ${payload.access}` },
     })
     if (meRes.ok) {
-      user = await meRes.json()
+      user = (await meRes.json()) as ApiUser
     }
   } catch {
     // ignore
@@ -250,7 +257,13 @@ export const apiClient = {
     return apiClient.post("/quiz-attempts/", data, token)
   },
 
-  getMeSummary: async (token: string): Promise<Partial<MeSummary>> => {
+    // User profile (UserSerializer)
+  getUser: async (token: string): Promise<ApiUser> => {
     return apiClient.get("/me/", token)
+  },
+
+
+  getMeSummary: async (token: string): Promise<MeSummary> => {
+    return apiClient.get("/me/summary/", token)
   },
 }

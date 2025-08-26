@@ -1,8 +1,7 @@
 "use client"
 
 import type React from "react"
-
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useAuth } from "@/lib/auth-store"
@@ -15,23 +14,30 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export default function LoginPage() {
   const router = useRouter()
-  const { loginWithTokens } = useAuth()
-  const [formData, setFormData] = useState({
-    username: "",
-    password: "",
-  })
+  const { loginWithTokens, hydrated, isAuthenticated } = useAuth()
+  const [formData, setFormData] = useState({ username: "", password: "" })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (hydrated && isAuthenticated) router.replace("/dashboard")
+  }, [hydrated, isAuthenticated, router])
+
+  if (!hydrated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError("")
-
     try {
       const response = await login(formData.username, formData.password)
-      // Only store tokens for now; fetch user later in the app
-      loginWithTokens(response.access, response.refresh)
+      loginWithTokens(response.access, response.refresh, response.user)
       router.replace("/dashboard")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed")
@@ -48,7 +54,6 @@ export default function LoginPage() {
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-
         <div className="space-y-2">
           <Label htmlFor="username">Username</Label>
           <Input
@@ -60,7 +65,6 @@ export default function LoginPage() {
             className="h-12"
           />
         </div>
-
         <div className="space-y-2">
           <Label htmlFor="password">Password</Label>
           <Input
@@ -72,7 +76,6 @@ export default function LoginPage() {
             className="h-12"
           />
         </div>
-
         <Button type="submit" className="w-full h-12" disabled={loading}>
           {loading ? "Signing in..." : "Sign In"}
         </Button>

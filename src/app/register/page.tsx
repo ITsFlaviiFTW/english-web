@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-store";
-import { login, api, ApiError } from "@/lib/api";
+import { login, api } from "@/lib/api";
 import AuthCard from "@/components/auth/AuthCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,17 +29,12 @@ export default function RegisterPage() {
   const [nonFieldError, setNonFieldError] = useState<string>("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
-  // Client-side password checks: >=8 chars, >=1 uppercase, >=1 special char, and not similar to username
-  const pwdChecks = useMemo<{
-    rules: { minLen: boolean; hasUpper: boolean; hasSpecial: boolean; notSimilarToUser: boolean };
-    requiredPass: boolean; // only minLen + hasUpper + hasSpecial
-  }>(() => {
+  const pwdChecks = useMemo(() => {
     const minLen = form.password.length >= 8;
     const hasUpper = /[A-Z]/.test(form.password);
     const hasSpecial = /[^A-Za-z0-9]/.test(form.password);
     const notSimilarToUser =
       !!form.username && !form.password.toLowerCase().includes(form.username.toLowerCase());
-
     return {
       rules: { minLen, hasUpper, hasSpecial, notSimilarToUser },
       requiredPass: minLen && hasUpper && hasSpecial,
@@ -55,7 +50,6 @@ export default function RegisterPage() {
       setFieldErrors((prev) => ({ ...prev, password: ["Passwords do not match."] }));
       return;
     }
-
     if (!pwdChecks.requiredPass) {
       setFieldErrors((prev) => ({
         ...prev,
@@ -68,29 +62,24 @@ export default function RegisterPage() {
     try {
       await api("/auth/register/", {
         method: "POST",
-        body: JSON.stringify({
-          username: form.username,
-          email: form.email,
-          password: form.password,
-        }),
+        body: JSON.stringify({ username: form.username, email: form.email, password: form.password }),
       });
 
       const r = await login(form.username, form.password);
-      loginWithTokens(r.access, r.refresh);
+      loginWithTokens(r.access, r.refresh, r.user);
       router.replace("/dashboard");
     } catch (err) {
-      if (err instanceof ApiError && err.status === 400) {
-        const d = (err.data || {}) as Record<string, string[] | string>;
-        const fe: FieldErrors = {};
-        for (const k of Object.keys(d)) {
-          const val = d[k];
-          fe[k as keyof FieldErrors] = Array.isArray(val) ? (val as string[]) : [String(val)];
-        }
-        if (Object.keys(fe).length) setFieldErrors(fe);
-        else setNonFieldError(err.message);
-      } else {
-        setNonFieldError(err instanceof Error ? err.message : "Registration failed");
-      }
+      // Our api() throws Error(message). Try to pull structured errors if present.
+      const message = err instanceof Error ? err.message : "Registration failed";
+      // If DRF returned a JSON body, our api() already tried to parse; we only have message.
+      // Optionally, detect common DRF phrases and map to fields:
+      const fe: FieldErrors = {};
+      if (/username/i.test(message)) fe.username = [message];
+      if (/email/i.test(message)) fe.email = [message];
+      if (/password/i.test(message)) fe.password = [message];
+
+      if (Object.keys(fe).length) setFieldErrors(fe);
+      else setNonFieldError(message);
     } finally {
       setLoading(false);
     }
@@ -106,16 +95,11 @@ export default function RegisterPage() {
             value={form.username}
             onChange={(e) => setForm({ ...form, username: e.target.value })}
             required
-            className={cn(
-              "h-12",
-              fieldErrors.username && "border-destructive focus-visible:ring-destructive"
-            )}
+            className={cn("h-12", fieldErrors.username && "border-destructive focus-visible:ring-destructive")}
           />
           {fieldErrors.username && (
             <ul className="mt-1 text-sm text-destructive list-disc list-inside">
-              {fieldErrors.username.map((m, i) => (
-                <li key={i}>{m}</li>
-              ))}
+              {fieldErrors.username.map((m, i) => <li key={i}>{m}</li>)}
             </ul>
           )}
         </div>
@@ -127,17 +111,11 @@ export default function RegisterPage() {
             type="email"
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}
-            required
-            className={cn(
-              "h-12",
-              fieldErrors.email && "border-destructive focus-visible:ring-destructive"
-            )}
+            className={cn("h-12", fieldErrors.email && "border-destructive focus-visible:ring-destructive")}
           />
           {fieldErrors.email && (
             <ul className="mt-1 text-sm text-destructive list-disc list-inside">
-              {fieldErrors.email.map((m, i) => (
-                <li key={i}>{m}</li>
-              ))}
+              {fieldErrors.email.map((m, i) => <li key={i}>{m}</li>)}
             </ul>
           )}
         </div>
@@ -159,21 +137,15 @@ export default function RegisterPage() {
                 : ""
             )}
           />
-
-          {/* Live criteria */}
           <div className="mt-2 grid grid-cols-1 gap-1 text-sm">
             <Criteria ok={!!pwdChecks.rules.minLen} text="At least 8 characters" />
             <Criteria ok={!!pwdChecks.rules.hasUpper} text="At least one uppercase letter" />
             <Criteria ok={!!pwdChecks.rules.hasSpecial} text="At least one special character (!@#$%^&*)" />
             <Criteria ok={!!pwdChecks.rules.notSimilarToUser} text="Not too similar to username" />
           </div>
-
-          {/* Backend field errors */}
           {fieldErrors.password && (
             <ul className="mt-2 text-sm text-destructive list-disc list-inside">
-              {fieldErrors.password.map((m, i) => (
-                <li key={i}>{m}</li>
-              ))}
+              {fieldErrors.password.map((m, i) => <li key={i}>{m}</li>)}
             </ul>
           )}
         </div>
@@ -194,7 +166,6 @@ export default function RegisterPage() {
           {loading ? "Creating account..." : "Create Account"}
         </Button>
 
-        {/* Non-field errors at the bottom */}
         {nonFieldError && (
           <Alert variant="destructive">
             <AlertDescription>{nonFieldError}</AlertDescription>
@@ -204,9 +175,7 @@ export default function RegisterPage() {
 
       <div className="text-center text-sm text-muted-foreground">
         Already have an account{" "}
-        <Link href="/login" className="text-primary hover:underline">
-          Sign in
-        </Link>
+        <Link href="/login" className="text-primary hover:underline">Sign in</Link>
       </div>
     </AuthCard>
   );
