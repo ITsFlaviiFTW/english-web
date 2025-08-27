@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { BookOpen, Trophy, Zap, Target } from "lucide-react"
 
 export default function DashboardPage() {
-  const { accessToken } = useAuth()
+  const { accessToken, user } = useAuth()
   const [summary, setSummary] = useState<MeSummary | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
@@ -55,6 +55,13 @@ export default function DashboardPage() {
   const nextLevelXP = summary ? summary.level * 100 + (summary.level - 1) * 20 : 100
   const progressPercentage = summary ? ((summary.xp - currentLevelXP) / (nextLevelXP - currentLevelXP)) * 100 : 0
 
+  const displayName =
+  summary?.display_name?.trim() ||
+  summary?.username?.trim() ||
+  user?.display_name?.trim() ||
+  user?.username?.trim() ||
+  "friend";
+
   return (
     <Protected>
       <Nav />
@@ -62,7 +69,7 @@ export default function DashboardPage() {
         {/* Welcome Section */}
         <div className="text-center space-y-4">
           <h1 className="text-3xl md:text-4xl font-bold">
-            Welcome back, {summary?.display_name || summary?.username}!
+            Welcome back, {displayName}!
           </h1>
           <p className="text-muted-foreground text-lg">Ready to continue your English learning journey?</p>
         </div>
