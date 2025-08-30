@@ -26,6 +26,8 @@ export default function LessonPage() {
   const [isFlipped, setIsFlipped] = useState(false)
   const [progress, setProgress] = useState([50])
 
+  const [updating, setUpdating] = useState(false);
+
   useEffect(() => {
     if (!accessToken || Number.isNaN(lessonId)) return
     ;(async () => {
@@ -55,10 +57,17 @@ export default function LessonPage() {
     setIsFlipped(false)
   }
 
-  // No-op for now; we'll wire this later.
   const handleProgressUpdate = async () => {
-    console.log("Progress update (no-op):", progress[0])
+  if (!lesson || !accessToken) return;
+  try {
+    setUpdating(true);
+    await apiClient.updateProgress({ lesson_id: lesson.id, percent: progress[0] }, accessToken);
+  } catch (e) {
+    console.error("Progress update failed:", e);
+  } finally {
+    setUpdating(false);
   }
+};
 
   if (isLoading) {
     return (
@@ -143,8 +152,8 @@ export default function LessonPage() {
                   </div>
                   <Slider value={progress} onValueChange={setProgress} max={100} step={10} className="w-full" />
                 </div>
-                <Button onClick={handleProgressUpdate} className="w-full">
-                  Update Progress
+                <Button onClick={handleProgressUpdate} className="w-full" disabled={updating}>
+                  {updating ? "Updating..." : "Update Progress"}
                 </Button>
               </CardContent>
             </Card>
