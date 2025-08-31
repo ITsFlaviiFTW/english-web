@@ -13,6 +13,21 @@ import { useAuth } from "@/lib/auth-store";
 import { apiClient, type LessonDetail, type QuizAttemptResult } from "@/lib/api";
 import { ArrowLeft, CheckCircle, XCircle, Trophy, Zap } from "lucide-react";
 
+type QType = "mcq" | "tf" | "fill" | "build";
+
+type McqPayload = { options: string[] };
+type TfPayload = Record<string, never>;
+type FillPayload = { blanks: number };
+type BuildPayload = { tokens: string[] };
+
+type QuizItem =
+  | { id: number; lesson_id?: number; prompt: string; qtype: "mcq"; payload: McqPayload }
+  | { id: number; lesson_id?: number; prompt: string; qtype: "tf"; payload: TfPayload }
+  | { id: number; lesson_id?: number; prompt: string; qtype: "fill"; payload: FillPayload }
+  | { id: number; lesson_id?: number; prompt: string; qtype: "build"; payload: BuildPayload };
+
+type LessonDetailUI = Omit<LessonDetail, "questions"> & { questions: QuizItem[] };
+
 type QuestionAnswer = { index?: number; value?: boolean; text?: string };
 type QuizAnswer = { question_id: number; selected: QuestionAnswer | null };
 
@@ -22,7 +37,7 @@ export default function QuizPage() {
   const lessonId = Number(params.lessonId as string);
   const { accessToken } = useAuth();
 
-  const [lesson, setLesson] = useState<LessonDetail | null>(null);
+  const [lesson, setLesson] = useState<LessonDetailUI | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [current, setCurrent] = useState(0);
@@ -35,9 +50,11 @@ export default function QuizPage() {
     (async () => {
       try {
         const data = await apiClient.getLessonDetail(lessonId, accessToken);
-        setLesson(data);
-        setAnswers(data.questions.map(q => ({ question_id: q.id, selected: null })));
-      } catch (e) {
+        // Widen questions to include "build"
+        const ui: LessonDetailUI = { ...(data as LessonDetail), questions: (data.questions as unknown as QuizItem[]) };
+        setLesson(ui);
+        setAnswers(ui.questions.map((q) => ({ question_id: q.id, selected: null })));
+      } catch {
         setError("Failed to load quiz");
       } finally {
         setLoading(false);
@@ -46,13 +63,13 @@ export default function QuizPage() {
   }, [lessonId, accessToken]);
 
   const setAnswer = (qid: number, selected: QuestionAnswer) => {
-    setAnswers(prev => prev.map(a => (a.question_id === qid ? { ...a, selected } : a)));
+    setAnswers((prev) => prev.map((a) => (a.question_id === qid ? { ...a, selected } : a)));
   };
 
   const currentAnswer = useMemo(() => {
     if (!lesson) return null;
     const qid = lesson.questions[current].id;
-    return answers.find(a => a.question_id === qid)?.selected ?? null;
+    return answers.find((a) => a.question_id === qid)?.selected ?? null;
   }, [answers, lesson, current]);
 
   const canProceed = !!currentAnswer;
@@ -63,11 +80,11 @@ export default function QuizPage() {
     try {
       const payload = {
         lesson_id: lesson.id,
-        answers: answers.filter(a => a.selected !== null),
+        answers: answers.filter((a) => a.selected !== null),
       };
       const r = await apiClient.submitQuizAttempt(payload, accessToken);
       setResult(r);
-    } catch (e) {
+    } catch {
       setError("Failed to submit quiz");
     } finally {
       setSubmitting(false);
@@ -105,7 +122,7 @@ export default function QuizPage() {
   }
 
   if (result) {
-    const correct = result.results.filter(r => r.is_correct).length;
+    const correct = result.results.filter((r) => r.is_correct).length;
     return (
       <Protected>
         <Nav />
@@ -142,17 +159,25 @@ export default function QuizPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {lesson.questions.map((q, idx) => {
-                const r = result.results.find(x => x.question_id === q.id);
+                const r = result.results.find((x) => x.question_id === q.id);
                 const ok = !!r?.is_correct;
                 return (
                   <div
                     key={q.id}
-                    className={`p-4 rounded-lg border ${ok ? "bg-secondary/10 border-secondary/20" : "bg-destructive/10 border-destructive/20"}`}
+                    className={`p-4 rounded-lg border ${
+                      ok ? "bg-secondary/10 border-secondary/20" : "bg-destructive/10 border-destructive/20"
+                    }`}
                   >
                     <div className="flex items-start gap-2">
-                      {ok ? <CheckCircle className="h-5 w-5 text-secondary mt-0.5" /> : <XCircle className="h-5 w-5 text-destructive mt-0.5" />}
+                      {ok ? (
+                        <CheckCircle className="h-5 w-5 text-secondary mt-0.5" />
+                      ) : (
+                        <XCircle className="h-5 w-5 text-destructive mt-0.5" />
+                      )}
                       <div className="flex-1">
-                        <div className="font-medium">Question {idx + 1}: {q.prompt}</div>
+                        <div className="font-medium">
+                          Question {idx + 1}: {q.prompt}
+                        </div>
                         <Badge variant={ok ? "default" : "destructive"}>{ok ? "Correct" : "Incorrect"}</Badge>
                       </div>
                     </div>
@@ -186,7 +211,9 @@ export default function QuizPage() {
             <ArrowLeft className="h-4 w-4" />
             Back to Lesson
           </Button>
-          <Badge variant="outline">{current + 1} / {lesson.questions.length}</Badge>
+          <Badge variant="outline">
+            {current + 1} / {lesson.questions.length}
+          </Badge>
         </div>
 
         <Card className="mb-6">
@@ -196,6 +223,7 @@ export default function QuizPage() {
               {q.qtype === "mcq" && "Choose the correct answer"}
               {q.qtype === "tf" && "Select true or false"}
               {q.qtype === "fill" && "Fill in the blank"}
+              {q.qtype === "build" && "Tap the tiles to build the sentence"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -204,7 +232,7 @@ export default function QuizPage() {
                 value={currentAnswer?.index?.toString() || ""}
                 onValueChange={(v) => setAnswer(q.id, { index: Number(v) })}
               >
-                {q.payload.options?.map((opt, i) => (
+                {(q.payload as McqPayload).options?.map((opt, i) => (
                   <label key={i} className="flex items-center gap-2 cursor-pointer">
                     <RadioGroupItem value={String(i)} />
                     <span>{opt}</span>
@@ -229,6 +257,14 @@ export default function QuizPage() {
               </RadioGroup>
             )}
 
+            {q.qtype === "build" && (
+              <TokenBuilder
+                tokens={(q.payload as BuildPayload).tokens}
+                value={currentAnswer?.text || ""}
+                onChange={(joined) => setAnswer(q.id, { text: joined })}
+              />
+            )}
+
             {q.qtype === "fill" && (
               <div className="space-y-2">
                 <Input
@@ -242,7 +278,7 @@ export default function QuizPage() {
         </Card>
 
         <div className="flex items-center justify-between">
-          <Button variant="outline" disabled={current === 0} onClick={() => setCurrent(v => Math.max(0, v - 1))}>
+          <Button variant="outline" disabled={current === 0} onClick={() => setCurrent((v) => Math.max(0, v - 1))}>
             Previous
           </Button>
           <div className="flex items-center gap-4">
@@ -252,7 +288,7 @@ export default function QuizPage() {
                 {submitting ? "Submitting..." : "Submit Quiz"}
               </Button>
             ) : (
-              <Button disabled={!canProceed} onClick={() => setCurrent(v => v + 1)}>
+              <Button disabled={!canProceed} onClick={() => setCurrent((v) => v + 1)}>
                 Next
               </Button>
             )}
@@ -260,5 +296,63 @@ export default function QuizPage() {
         </div>
       </div>
     </Protected>
+  );
+}
+
+function TokenBuilder({
+  tokens,
+  value,
+  onChange,
+}: {
+  tokens: string[];
+  value: string;
+  onChange: (joined: string) => void;
+}) {
+  const selected = value ? value.split(" ") : [];
+  const remaining = tokens.filter(
+    (t) => selected.filter((s) => s === t).length < tokens.filter((x) => x === t).length,
+  );
+
+  const add = (t: string) => onChange((value ? value + " " : "") + t);
+  const removeAt = (i: number) => {
+    const next = selected.slice();
+    next.splice(i, 1);
+    onChange(next.join(" "));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {remaining.map((t, i) => (
+          <button
+            key={`rem-${i}-${t}`}
+            type="button"
+            className="px-3 py-2 rounded-md border hover:bg-muted"
+            onClick={() => add(t)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-12 p-3 rounded-md border bg-muted/30">
+        {selected.length === 0 ? (
+          <span className="text-muted-foreground text-sm">Tap tiles above to build your answer…</span>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {selected.map((t, i) => (
+              <button
+                key={`sel-${i}-${t}`}
+                type="button"
+                className="px-3 py-2 rounded-md border bg-background hover:bg-destructive/10"
+                onClick={() => removeAt(i)}
+                title="Remove token"
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

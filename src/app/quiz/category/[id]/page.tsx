@@ -1,137 +1,138 @@
-"use client"
+"use client";
 
-import { useEffect, useMemo, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
-import Protected from "@/components/Protected"
-import Nav from "@/components/Nav"
-import { useAuth } from "@/lib/auth-store"
-import { apiClient } from "@/lib/api"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle, Zap } from "lucide-react"
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import Protected from "@/components/Protected";
+import Nav from "@/components/Nav";
+import { useAuth } from "@/lib/auth-store";
+import { apiClient } from "@/lib/api";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle, Zap } from "lucide-react";
 
-type QType = "mcq" | "tf" | "fill"
+type QType = "mcq" | "tf" | "fill" | "build";
 
-type McqPayload = { options: string[] }
-type TfPayload = Record<string, never>
-type FillPayload = { blanks: number }
+type McqPayload = { options: string[] };
+type TfPayload = Record<string, never>;
+type FillPayload = { blanks: number };
+type BuildPayload = { tokens: string[] };
 
 type QuizItem =
   | { id: number; lesson_id?: number; prompt: string; qtype: "mcq"; payload: McqPayload }
   | { id: number; lesson_id?: number; prompt: string; qtype: "tf"; payload: TfPayload }
   | { id: number; lesson_id?: number; prompt: string; qtype: "fill"; payload: FillPayload }
+  | { id: number; lesson_id?: number; prompt: string; qtype: "build"; payload: BuildPayload };
 
 type AnswerSelection =
   | { kind: "mcq"; index: number }
   | { kind: "tf"; value: boolean }
   | { kind: "fill"; text: string }
+  | { kind: "build"; text: string };
 
-type Answer = { question_id: number; selected: AnswerSelection | null }
+type Answer = { question_id: number; selected: AnswerSelection | null };
 
 type SubmitResult = {
-  score_pct: number
-  xp_delta: number
-  results: Array<{ question_id: number; is_correct: boolean }>
-}
+  score_pct: number;
+  xp_delta: number;
+  results: Array<{ question_id: number; is_correct: boolean }>;
+};
 
 export default function CategoryQuizPage() {
-  const router = useRouter()
-  const { id } = useParams<{ id: string }>()
-  const { accessToken } = useAuth()
+  const router = useRouter();
+  const { id } = useParams<{ id: string }>();
+  const { accessToken } = useAuth();
 
-  const [items, setItems] = useState<QuizItem[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState("")
-  const [currentIdx, setCurrentIdx] = useState(0)
-  const [answers, setAnswers] = useState<Answer[]>([])
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [result, setResult] = useState<SubmitResult | null>(null)
-  const [showResults, setShowResults] = useState(false)
+  const [items, setItems] = useState<QuizItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [answers, setAnswers] = useState<Answer[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [result, setResult] = useState<SubmitResult | null>(null);
+  const [showResults, setShowResults] = useState(false);
 
   useEffect(() => {
-    if (!accessToken || !id) return
-    ;(async () => {
-      setIsLoading(true)
-      setError("")
+    if (!accessToken || !id) return;
+    (async () => {
+      setIsLoading(true);
+      setError("");
       try {
-        const data = await apiClient.get(`/quiz/random/?size=10&category_id=${id}`, accessToken)
-        const fetched: QuizItem[] = (data?.items ?? []) as QuizItem[]
-        setItems(fetched)
+        const data = await apiClient.get(`/quiz/random/?size=10&category_id=${id}`, accessToken);
+        const fetched: QuizItem[] = (data?.items ?? []) as QuizItem[];
+        setItems(fetched);
         setAnswers(
           fetched.map((q) => ({
             question_id: q.id,
             selected: null,
           })),
-        )
+        );
       } catch {
-        setError("Failed to load category quiz")
+        setError("Failed to load category quiz");
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
-    })()
-  }, [accessToken, id])
+    })();
+  }, [accessToken, id]);
 
-  const total = items.length
+  const total = items.length;
   const progressPct = useMemo(() => {
-    if (!total) return 0
-    return Math.round(((currentIdx + 1) / total) * 100)
-  }, [currentIdx, total])
+    if (!total) return 0;
+    return Math.round(((currentIdx + 1) / total) * 100);
+  }, [currentIdx, total]);
 
-  const current = items[currentIdx]
+  const current = items[currentIdx];
 
   const getCurrentAnswer = (questionId: number) =>
-    answers.find((a) => a.question_id === questionId)?.selected ?? null
+    answers.find((a) => a.question_id === questionId)?.selected ?? null;
 
   const updateAnswer = (questionId: number, selected: AnswerSelection) => {
-    setAnswers((prev) =>
-      prev.map((a) => (a.question_id === questionId ? { ...a, selected } : a)),
-    )
-  }
+    setAnswers((prev) => prev.map((a) => (a.question_id === questionId ? { ...a, selected } : a)));
+  };
 
   const canProceed = () => {
-    if (!current) return false
-    const sel = getCurrentAnswer(current.id)
-    return sel !== null && sel !== undefined
-  }
+    if (!current) return false;
+    const sel = getCurrentAnswer(current.id);
+    return sel !== null && sel !== undefined;
+  };
 
   const handlePrevious = () => {
-    if (currentIdx > 0) setCurrentIdx((i) => i - 1)
-  }
+    if (currentIdx > 0) setCurrentIdx((i) => i - 1);
+  };
 
   const handleNext = () => {
-    if (currentIdx < total - 1) setCurrentIdx((i) => i + 1)
-  }
+    if (currentIdx < total - 1) setCurrentIdx((i) => i + 1);
+  };
 
   const handleSubmit = async () => {
-    if (!accessToken || !items.length) return
-    setIsSubmitting(true)
-    setError("")
+    if (!accessToken || !items.length) return;
+    setIsSubmitting(true);
+    setError("");
     try {
-      const lessonId = items.find((i) => i.lesson_id)?.lesson_id ?? 0
+      const lessonId = items.find((i) => i.lesson_id)?.lesson_id ?? 0;
       const payload = {
         lesson_id: lessonId,
         answers: answers
           .filter((a) => a.selected !== null)
           .map((a) => {
-            const sel = a.selected!
-            if (sel.kind === "mcq") return { question_id: a.question_id, selected: { index: sel.index } }
-            if (sel.kind === "tf") return { question_id: a.question_id, selected: { value: sel.value } }
-            return { question_id: a.question_id, selected: { text: sel.text } }
+            const sel = a.selected!;
+            if (sel.kind === "mcq") return { question_id: a.question_id, selected: { index: sel.index } };
+            if (sel.kind === "tf") return { question_id: a.question_id, selected: { value: sel.value } };
+            return { question_id: a.question_id, selected: { text: sel.text } };
           }),
-      }
-      const r = await apiClient.post("/quiz-attempts/", payload, accessToken)
-      setResult(r as SubmitResult)
-      setShowResults(true)
+      };
+      const r = await apiClient.post("/quiz-attempts/", payload, accessToken);
+      setResult(r as SubmitResult);
+      setShowResults(true);
     } catch {
-      setError("Failed to submit quiz")
+      setError("Failed to submit quiz");
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   if (isLoading) {
     return (
@@ -141,7 +142,7 @@ export default function CategoryQuizPage() {
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>
       </Protected>
-    )
+    );
   }
 
   if (error || !current) {
@@ -160,11 +161,11 @@ export default function CategoryQuizPage() {
           </Card>
         </div>
       </Protected>
-    )
+    );
   }
 
   if (showResults && result) {
-    const correct = result.results.filter((r) => r.is_correct).length
+    const correct = result.results.filter((r) => r.is_correct).length;
     return (
       <Protected>
         <Nav />
@@ -203,8 +204,8 @@ export default function CategoryQuizPage() {
               <CardContent>
                 <div className="space-y-4">
                   {items.map((q, i) => {
-                    const r = result.results.find((x) => x.question_id === q.id)
-                    const isCorrect = !!r?.is_correct
+                    const r = result.results.find((x) => x.question_id === q.id);
+                    const isCorrect = !!r?.is_correct;
                     return (
                       <div
                         key={q.id}
@@ -228,7 +229,7 @@ export default function CategoryQuizPage() {
                           </div>
                         </div>
                       </div>
-                    )
+                    );
                   })}
                 </div>
               </CardContent>
@@ -243,10 +244,10 @@ export default function CategoryQuizPage() {
                 variant="outline"
                 className="gap-2"
                 onClick={() => {
-                  setShowResults(false)
-                  setResult(null)
-                  setCurrentIdx(0)
-                  setAnswers(items.map((q) => ({ question_id: q.id, selected: null })))
+                  setShowResults(false);
+                  setResult(null);
+                  setCurrentIdx(0);
+                  setAnswers(items.map((q) => ({ question_id: q.id, selected: null })));
                 }}
               >
                 <RotateCcw className="h-4 w-4" />
@@ -256,7 +257,7 @@ export default function CategoryQuizPage() {
           </div>
         </main>
       </Protected>
-    )
+    );
   }
 
   return (
@@ -280,6 +281,7 @@ export default function CategoryQuizPage() {
               {current.qtype === "mcq" && "Choose the correct answer"}
               {current.qtype === "tf" && "Select true or false"}
               {current.qtype === "fill" && "Fill in the blank"}
+              {current.qtype === "build" && "Tap the tiles to build the sentence"}
             </CardDescription>
           </CardHeader>
           <CardContent>{renderQuestion(current, getCurrentAnswer, updateAnswer)}</CardContent>
@@ -302,7 +304,7 @@ export default function CategoryQuizPage() {
         </div>
       </main>
     </Protected>
-  )
+  );
 }
 
 function renderQuestion(
@@ -310,15 +312,15 @@ function renderQuestion(
   getAnswer: (id: number) => AnswerSelection | null,
   update: (id: number, sel: AnswerSelection) => void,
 ) {
-  const sel = getAnswer(q.id)
+  const sel = getAnswer(q.id);
 
   if (q.qtype === "mcq") {
-    const value = sel?.kind === "mcq" ? String(sel.index) : ""
+    const value = sel?.kind === "mcq" ? String(sel.index) : "";
     return (
       <div className="space-y-4">
         <h3 className="text-lg font-medium">{q.prompt}</h3>
         <RadioGroup value={value} onValueChange={(v) => update(q.id, { kind: "mcq", index: parseInt(v, 10) })}>
-          {q.payload.options.map((opt, i) => (
+          {(q.payload as McqPayload).options.map((opt, i) => (
             <div key={i} className="flex items-center space-x-2">
               <RadioGroupItem value={String(i)} id={`opt-${q.id}-${i}`} />
               <Label htmlFor={`opt-${q.id}-${i}`} className="cursor-pointer">
@@ -328,11 +330,11 @@ function renderQuestion(
           ))}
         </RadioGroup>
       </div>
-    )
+    );
   }
 
   if (q.qtype === "tf") {
-    const value = sel?.kind === "tf" ? String(sel.value) : ""
+    const value = sel?.kind === "tf" ? String(sel.value) : "";
     return (
       <div className="space-y-4">
         <h3 className="text-lg font-medium">{q.prompt}</h3>
@@ -351,19 +353,95 @@ function renderQuestion(
           </div>
         </RadioGroup>
       </div>
-    )
+    );
   }
 
-  // fill
-  const text = sel?.kind === "fill" ? sel.text : ""
+  // --- handle build BEFORE fill ---
+  if (q.qtype === "build") {
+    const text = sel?.kind === "build" ? sel.text : "";
+    return (
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium">{q.prompt}</h3>
+        <TokenBuilder
+          tokens={(q.payload as BuildPayload).tokens}
+          value={text}
+          onChange={(joined: string) => update(q.id, { kind: "build", text: joined })}
+        />
+      </div>
+    );
+  }
+
+  if (q.qtype === "fill") {
+    const text = sel?.kind === "fill" ? sel.text : "";
+    return (
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium">{q.prompt}</h3>
+        <Input
+          placeholder="Type your answer here..."
+          value={text}
+          onChange={(e) => update(q.id, { kind: "fill", text: e.target.value })}
+        />
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function TokenBuilder({
+  tokens,
+  value,
+  onChange,
+}: {
+  tokens: string[];
+  value: string;
+  onChange: (joined: string) => void;
+}) {
+  const selected = value ? value.split(" ") : [];
+  const remaining = tokens.filter(
+    (t) => selected.filter((s) => s === t).length < tokens.filter((x) => x === t).length,
+  );
+
+  const add = (t: string) => onChange((value ? value + " " : "") + t);
+  const removeAt = (i: number) => {
+    const next = selected.slice();
+    next.splice(i, 1);
+    onChange(next.join(" "));
+  };
+
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-medium">{q.prompt}</h3>
-      <Input
-        placeholder="Type your answer here..."
-        value={text}
-        onChange={(e) => update(q.id, { kind: "fill", text: e.target.value })}
-      />
+      <div className="flex flex-wrap gap-2">
+        {remaining.map((t, i) => (
+          <button
+            key={`rem-${i}-${t}`}
+            type="button"
+            className="px-3 py-2 rounded-md border hover:bg-muted"
+            onClick={() => add(t)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-12 p-3 rounded-md border bg-muted/30">
+        {selected.length === 0 ? (
+          <span className="text-muted-foreground text-sm">Tap tiles above to build your answer…</span>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {selected.map((t, i) => (
+              <button
+                key={`sel-${i}-${t}`}
+                type="button"
+                className="px-3 py-2 rounded-md border bg-background hover:bg-destructive/10"
+                onClick={() => removeAt(i)}
+                title="Remove token"
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
-  )
+  );
 }
