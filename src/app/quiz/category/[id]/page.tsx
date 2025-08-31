@@ -14,18 +14,16 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle, Zap } from "lucide-react";
 
-type QType = "mcq" | "tf" | "fill" | "build";
-
 type McqPayload = { options: string[] };
 type TfPayload = Record<string, never>;
 type FillPayload = { blanks: number };
 type BuildPayload = { tokens: string[] };
 
 type QuizItem =
-  | { id: number; lesson_id?: number; prompt: string; qtype: "mcq"; payload: McqPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "tf"; payload: TfPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "fill"; payload: FillPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "build"; payload: BuildPayload };
+  | { id: number; lesson_id?: number; item_index?: number; prompt: string; qtype: "mcq";  payload: McqPayload }
+  | { id: number; lesson_id?: number; item_index?: number; prompt: string; qtype: "tf";   payload: TfPayload }
+  | { id: number; lesson_id?: number; item_index?: number; prompt: string; qtype: "fill"; payload: FillPayload }
+  | { id: number; lesson_id?: number; item_index?: number; prompt: string; qtype: "build";payload: BuildPayload };
 
 type AnswerSelection =
   | { kind: "mcq"; index: number }
@@ -99,32 +97,34 @@ export default function CategoryQuizPage() {
     return sel !== null && sel !== undefined;
   };
 
-  const handlePrevious = () => {
-    if (currentIdx > 0) setCurrentIdx((i) => i - 1);
-  };
-
-  const handleNext = () => {
-    if (currentIdx < total - 1) setCurrentIdx((i) => i + 1);
-  };
-
   const handleSubmit = async () => {
     if (!accessToken || !items.length) return;
     setIsSubmitting(true);
     setError("");
     try {
-      const lessonId = items.find((i) => i.lesson_id)?.lesson_id ?? 0;
       const payload = {
-        lesson_id: lessonId,
         answers: answers
           .filter((a) => a.selected !== null)
           .map((a) => {
             const sel = a.selected!;
-            if (sel.kind === "mcq") return { question_id: a.question_id, selected: { index: sel.index } };
-            if (sel.kind === "tf") return { question_id: a.question_id, selected: { value: sel.value } };
-            return { question_id: a.question_id, selected: { text: sel.text } };
+            const q = items.find((x) => x.id === a.question_id)!;
+
+            const selected =
+              sel.kind === "mcq"   ? { index: sel.index } :
+              sel.kind === "tf"    ? { value: sel.value } :
+              sel.kind === "build" ? { tokens: sel.text.trim().split(/\s+/) } :
+                                     { text: sel.text };
+
+            return {
+              qid: a.question_id,
+              lesson_id: q.lesson_id!,     // provided by GET /quiz/random/
+              item_index: q.item_index!,   // provided by GET /quiz/random/
+              selected,
+            };
           }),
       };
-      const r = await apiClient.post("/quiz-attempts/", payload, accessToken);
+
+      const r = await apiClient.post("/quiz/random/attempts/", payload, accessToken);
       setResult(r as SubmitResult);
       setShowResults(true);
     } catch {

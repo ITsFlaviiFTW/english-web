@@ -13,7 +13,6 @@ import { useAuth } from "@/lib/auth-store";
 import { apiClient, type LessonDetail, type QuizAttemptResult } from "@/lib/api";
 import { ArrowLeft, CheckCircle, XCircle, Trophy, Zap } from "lucide-react";
 
-type QType = "mcq" | "tf" | "fill" | "build";
 
 type McqPayload = { options: string[] };
 type TfPayload = Record<string, never>;
