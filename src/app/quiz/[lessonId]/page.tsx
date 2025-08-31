@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Protected from "@/components/Protected";
 import Nav from "@/components/Nav";
@@ -28,8 +28,27 @@ type QuizItem =
 
 type LessonDetailUI = Omit<LessonDetail, "questions"> & { questions: QuizItem[] };
 
-type QuestionAnswer = { index?: number; value?: boolean; text?: string };
-type QuizAnswer = { question_id: number; selected: QuestionAnswer | null };
+// Union type for selected answers
+type UISelected =
+  | { type: "mcq"; index: number }
+  | { type: "tf"; value: boolean | null }
+  | { type: "fill"; text: string }
+  | { type: "build"; tokens: string[] };
+
+type QuizAnswer = { question_id: number; selected: UISelected | null };
+
+// --- type guards ---
+const isMcq = (s: UISelected | undefined): s is Extract<UISelected, { type: "mcq" }> =>
+  !!s && s.type === "mcq";
+
+const isTf = (s: UISelected | undefined): s is Extract<UISelected, { type: "tf" }> =>
+  !!s && s.type === "tf";
+
+const isFill = (s: UISelected | undefined): s is Extract<UISelected, { type: "fill" }> =>
+  !!s && s.type === "fill";
+
+const isBuild = (s: UISelected | undefined): s is Extract<UISelected, { type: "build" }> =>
+  !!s && s.type === "build";
 
 export default function QuizPage() {
   const router = useRouter();
@@ -50,7 +69,6 @@ export default function QuizPage() {
     (async () => {
       try {
         const data = await apiClient.getLessonDetail(lessonId, accessToken);
-        // Widen questions to include "build"
         const ui: LessonDetailUI = { ...(data as LessonDetail), questions: (data.questions as unknown as QuizItem[]) };
         setLesson(ui);
         setAnswers(ui.questions.map((q) => ({ question_id: q.id, selected: null })));
@@ -62,17 +80,10 @@ export default function QuizPage() {
     })();
   }, [lessonId, accessToken]);
 
-  const setAnswer = (qid: number, selected: QuestionAnswer) => {
+  const setAnswer = (qid: number, selected: UISelected) => {
     setAnswers((prev) => prev.map((a) => (a.question_id === qid ? { ...a, selected } : a)));
   };
 
-  const currentAnswer = useMemo(() => {
-    if (!lesson) return null;
-    const qid = lesson.questions[current].id;
-    return answers.find((a) => a.question_id === qid)?.selected ?? null;
-  }, [answers, lesson, current]);
-
-  
   const submit = async () => {
     if (!lesson || !accessToken) return;
     setSubmitting(true);
@@ -200,10 +211,9 @@ export default function QuizPage() {
 
   const q = lesson.questions[current];
   const pct = Math.round(((current + 1) / lesson.questions.length) * 100);
+  const sel = answers.find((a) => a.question_id === q.id)?.selected ?? undefined;
 
-  const canProceed =
-  !!currentAnswer &&
-  (q.qtype !== "build" ? true : (currentAnswer.text || "").trim().length > 0);
+  const canProceed = !!sel && (q.qtype === "build" ? (isBuild(sel) && sel.tokens.length > 0) : true);
 
   return (
     <Protected>
@@ -230,13 +240,12 @@ export default function QuizPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {/* show the prompt */}
             <div className="mb-4 text-lg font-medium">{q.prompt}</div>
 
             {q.qtype === "mcq" && (
               <RadioGroup
-                value={currentAnswer?.index?.toString() || ""}
-                onValueChange={(v) => setAnswer(q.id, { index: Number(v) })}
+                value={isMcq(sel) && sel.index != null ? String(sel.index) : ""}
+                onValueChange={(v) => setAnswer(q.id, { type: "mcq", index: Number(v) })}
               >
                 {(q.payload as McqPayload).options?.map((opt, i) => (
                   <label key={i} className="flex items-center gap-2 cursor-pointer">
@@ -249,8 +258,8 @@ export default function QuizPage() {
 
             {q.qtype === "tf" && (
               <RadioGroup
-                value={currentAnswer?.value?.toString() || ""}
-                onValueChange={(v) => setAnswer(q.id, { value: v === "true" })}
+                value={isTf(sel) && sel.value != null ? String(sel.value) : ""}
+                onValueChange={(v) => setAnswer(q.id, { type: "tf", value: v === "true" })}
               >
                 <label className="flex items-center gap-2 cursor-pointer">
                   <RadioGroupItem value="true" />
@@ -266,19 +275,17 @@ export default function QuizPage() {
             {q.qtype === "build" && (
               <TokenBuilder
                 tokens={(q.payload as BuildPayload).tokens}
-                value={currentAnswer?.text || ""}
-                onChange={(joined) => setAnswer(q.id, { text: joined })}
+                value={isBuild(sel) ? sel.tokens : []}
+                onChange={(tokens) => setAnswer(q.id, { type: "build", tokens })}
               />
             )}
 
             {q.qtype === "fill" && (
-              <div className="space-y-2">
-                <Input
-                  placeholder="Type your answer…"
-                  value={currentAnswer?.text || ""}
-                  onChange={(e) => setAnswer(q.id, { text: e.target.value })}
-                />
-              </div>
+              <Input
+                placeholder="Type your answer…"
+                value={isFill(sel) ? sel.text : ""}
+                onChange={(e) => setAnswer(q.id, { type: "fill", text: e.target.value })}
+              />
             )}
           </CardContent>
         </Card>
@@ -311,19 +318,19 @@ function TokenBuilder({
   onChange,
 }: {
   tokens: string[];
-  value: string;
-  onChange: (joined: string) => void;
+  value: string[]; // use array, not string
+  onChange: (joined: string[]) => void;
 }) {
-  const selected = value ? value.split(" ") : [];
+  const selected = value;
   const remaining = tokens.filter(
     (t) => selected.filter((s) => s === t).length < tokens.filter((x) => x === t).length,
   );
 
-  const add = (t: string) => onChange((value ? value + " " : "") + t);
+  const add = (t: string) => onChange([...selected, t]);
   const removeAt = (i: number) => {
     const next = selected.slice();
     next.splice(i, 1);
-    onChange(next.join(" "));
+    onChange(next);
   };
 
   return (

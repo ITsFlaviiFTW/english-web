@@ -1,3 +1,4 @@
+// src/app/quiz/random/page.tsx (or your current path)
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -13,27 +14,13 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle, Zap } from "lucide-react";
-
-type QType = "mcq" | "tf" | "fill" | "build";
-
-type McqPayload = { options: string[] };
-type TfPayload = Record<string, never>;
-type FillPayload = { blanks: number };
-type BuildPayload = { tokens: string[] };
-
-type QuizItem =
-  | { id: number; lesson_id?: number; prompt: string; qtype: "mcq"; payload: McqPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "tf"; payload: TfPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "fill"; payload: FillPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "build"; payload: BuildPayload };
-
-type AnswerSelection =
-  | { kind: "mcq"; index: number }
-  | { kind: "tf"; value: boolean }
-  | { kind: "fill"; text: string }
-  | { kind: "build"; text: string };
-
-type Answer = { question_id: number; selected: AnswerSelection | null };
+import {
+  buildSubmitPayload,
+  type UIQuestion,
+  type UISelected,
+  type McqPayload,
+  type BuildPayload,
+} from "@/lib/quizPayload";
 
 type SubmitResult = {
   score_pct: number;
@@ -45,11 +32,11 @@ export default function RandomQuizPage() {
   const router = useRouter();
   const { accessToken } = useAuth();
 
-  const [items, setItems] = useState<QuizItem[]>([]);
+  const [items, setItems] = useState<UIQuestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [answers, setAnswers] = useState<Answer[]>([]);
+  const [selections, setSelections] = useState<Record<number, UISelected | undefined>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<SubmitResult | null>(null);
   const [showResults, setShowResults] = useState(false);
@@ -61,14 +48,11 @@ export default function RandomQuizPage() {
       setError("");
       try {
         const data = await apiClient.get(`/quiz/random/?size=10`, accessToken);
-        const fetched: QuizItem[] = (data?.items ?? []) as QuizItem[];
+        const fetched: UIQuestion[] = (data?.items ?? []) as UIQuestion[];
         setItems(fetched);
-        setAnswers(
-          fetched.map((q) => ({
-            question_id: q.id,
-            selected: null,
-          })),
-        );
+        const init: Record<number, UISelected | undefined> = {};
+        fetched.forEach((q) => (init[q.id] = undefined));
+        setSelections(init);
       } catch {
         setError("Failed to load random quiz");
       } finally {
@@ -85,25 +69,18 @@ export default function RandomQuizPage() {
 
   const current = items[currentIdx];
 
-  const getCurrentAnswer = (questionId: number) =>
-    answers.find((a) => a.question_id === questionId)?.selected ?? null;
-
-  const updateAnswer = (questionId: number, selected: AnswerSelection) => {
-    setAnswers((prev) => prev.map((a) => (a.question_id === questionId ? { ...a, selected } : a)));
-  };
+  const setAnswer = (qid: number, sel: UISelected) =>
+    setSelections((prev) => ({ ...prev, [qid]: sel }));
 
   const canProceed = () => {
     if (!current) return false;
-    const sel = getCurrentAnswer(current.id);
-    return sel !== null && sel !== undefined;
-  };
-
-  const handlePrevious = () => {
-    if (currentIdx > 0) setCurrentIdx((i) => i - 1);
-  };
-
-  const handleNext = () => {
-    if (currentIdx < total - 1) setCurrentIdx((i) => i + 1);
+    const sel = selections[current.id];
+    if (!sel) return false;
+    if (current.qtype === "build") return sel.type === "build" && sel.tokens.length > 0;
+    if (current.qtype === "mcq") return sel.type === "mcq" && sel.index != null;
+    if (current.qtype === "tf") return sel.type === "tf" && sel.value != null;
+    if (current.qtype === "fill") return sel.type === "fill";
+    return false;
   };
 
   const handleSubmit = async () => {
@@ -111,18 +88,9 @@ export default function RandomQuizPage() {
     setIsSubmitting(true);
     setError("");
     try {
+      // any lesson_id is fine; backend doesn’t use it for mixed quizzes
       const lessonId = items.find((i) => i.lesson_id)?.lesson_id ?? 0;
-      const payload = {
-        lesson_id: lessonId,
-        answers: answers
-          .filter((a) => a.selected !== null)
-          .map((a) => {
-            const sel = a.selected!;
-            if (sel.kind === "mcq") return { question_id: a.question_id, selected: { index: sel.index } };
-            if (sel.kind === "tf") return { question_id: a.question_id, selected: { value: sel.value } };
-            return { question_id: a.question_id, selected: { text: sel.text } };
-          }),
-      };
+      const payload = buildSubmitPayload(lessonId, items, selections);
       const r = await apiClient.post("/quiz-attempts/", payload, accessToken);
       setResult(r as SubmitResult);
       setShowResults(true);
@@ -246,7 +214,9 @@ export default function RandomQuizPage() {
                   setShowResults(false);
                   setResult(null);
                   setCurrentIdx(0);
-                  setAnswers(items.map((q) => ({ question_id: q.id, selected: null })));
+                  const init: Record<number, UISelected | undefined> = {};
+                  items.forEach((q) => (init[q.id] = undefined));
+                  setSelections(init);
                 }}
               >
                 <RotateCcw className="h-4 w-4" />
@@ -283,11 +253,13 @@ export default function RandomQuizPage() {
               {current.qtype === "build" && "Tap the tiles to build the sentence"}
             </CardDescription>
           </CardHeader>
-          <CardContent>{renderQuestion(current, getCurrentAnswer, updateAnswer)}</CardContent>
+          <CardContent>
+            {renderQuestion(current, selections[current.id], (sel) => setAnswer(current.id, sel))}
+          </CardContent>
         </Card>
 
         <div className="flex items-center justify-between">
-          <Button onClick={handlePrevious} disabled={currentIdx === 0} variant="outline">
+          <Button onClick={() => setCurrentIdx((i) => Math.max(0, i - 1))} disabled={currentIdx === 0} variant="outline">
             Previous
           </Button>
 
@@ -296,7 +268,7 @@ export default function RandomQuizPage() {
               {isSubmitting ? "Submitting..." : "Submit Quiz"}
             </Button>
           ) : (
-            <Button onClick={handleNext} disabled={!canProceed()}>
+            <Button onClick={() => setCurrentIdx((i) => i + 1)} disabled={!canProceed()}>
               Next
             </Button>
           )}
@@ -307,18 +279,16 @@ export default function RandomQuizPage() {
 }
 
 function renderQuestion(
-  q: QuizItem,
-  getAnswer: (id: number) => AnswerSelection | null,
-  update: (id: number, sel: AnswerSelection) => void,
+  q: UIQuestion,
+  sel: UISelected | undefined,
+  update: (sel: UISelected) => void
 ) {
-  const sel = getAnswer(q.id);
-
   if (q.qtype === "mcq") {
-    const value = sel?.kind === "mcq" ? String(sel.index) : "";
+    const value = sel?.type === "mcq" && sel.index != null ? String(sel.index) : "";
     return (
       <div className="space-y-4">
         <h3 className="text-lg font-medium">{q.prompt}</h3>
-        <RadioGroup value={value} onValueChange={(v) => update(q.id, { kind: "mcq", index: parseInt(v, 10) })}>
+        <RadioGroup value={value} onValueChange={(v) => update({ type: "mcq", index: parseInt(v, 10) })}>
           {(q.payload as McqPayload).options.map((opt, i) => (
             <div key={i} className="flex items-center space-x-2">
               <RadioGroupItem value={String(i)} id={`opt-${q.id}-${i}`} />
@@ -333,11 +303,11 @@ function renderQuestion(
   }
 
   if (q.qtype === "tf") {
-    const value = sel?.kind === "tf" ? String(sel.value) : "";
+    const value = sel?.type === "tf" && sel.value != null ? String(sel.value) : "";
     return (
       <div className="space-y-4">
         <h3 className="text-lg font-medium">{q.prompt}</h3>
-        <RadioGroup value={value} onValueChange={(v) => update(q.id, { kind: "tf", value: v === "true" })}>
+        <RadioGroup value={value} onValueChange={(v) => update({ type: "tf", value: v === "true" })}>
           <div className="flex items-center space-x-2">
             <RadioGroupItem value="true" id={`true-${q.id}`} />
             <Label htmlFor={`true-${q.id}`} className="cursor-pointer">
@@ -355,36 +325,28 @@ function renderQuestion(
     );
   }
 
-  // --- handle build BEFORE fill ---
   if (q.qtype === "build") {
-    const text = sel?.kind === "build" ? sel.text : "";
+    const tokens = sel?.type === "build" ? sel.tokens : [];
     return (
       <div className="space-y-4">
         <h3 className="text-lg font-medium">{q.prompt}</h3>
         <TokenBuilder
           tokens={(q.payload as BuildPayload).tokens}
-          value={text}
-          onChange={(joined: string) => update(q.id, { kind: "build", text: joined })}
+          value={tokens}
+          onChange={(toks) => update({ type: "build", tokens: toks })}
         />
       </div>
     );
   }
 
-  if (q.qtype === "fill") {
-    const text = sel?.kind === "fill" ? sel.text : "";
-    return (
-      <div className="space-y-4">
-        <h3 className="text-lg font-medium">{q.prompt}</h3>
-        <Input
-          placeholder="Type your answer here..."
-          value={text}
-          onChange={(e) => update(q.id, { kind: "fill", text: e.target.value })}
-        />
-      </div>
-    );
-  }
-
-  return null;
+  // fill
+  const text = sel?.type === "fill" ? sel.text : "";
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-medium">{q.prompt}</h3>
+      <Input placeholder="Type your answer here..." value={text} onChange={(e) => update({ type: "fill", text: e.target.value })} />
+    </div>
+  );
 }
 
 function TokenBuilder({
@@ -393,19 +355,22 @@ function TokenBuilder({
   onChange,
 }: {
   tokens: string[];
-  value: string;
-  onChange: (joined: string) => void;
+  value: string[];
+  onChange: (joined: string[]) => void;
 }) {
-  const selected = value ? value.split(" ") : [];
-  const remaining = tokens.filter(
-    (t) => selected.filter((s) => s === t).length < tokens.filter((x) => x === t).length,
-  );
+  const selected = value;
+  const remaining = tokens.reduce<string[]>((acc, t) => {
+    const used = selected.filter((s) => s === t).length;
+    const total = tokens.filter((x) => x === t).length;
+    if (used < total) acc.push(t);
+    return acc;
+  }, []);
 
-  const add = (t: string) => onChange((value ? value + " " : "") + t);
+  const add = (t: string) => onChange([...selected, t]);
   const removeAt = (i: number) => {
     const next = selected.slice();
     next.splice(i, 1);
-    onChange(next.join(" "));
+    onChange(next);
   };
 
   return (
