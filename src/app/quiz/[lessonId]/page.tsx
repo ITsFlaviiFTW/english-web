@@ -72,8 +72,7 @@ export default function QuizPage() {
     return answers.find((a) => a.question_id === qid)?.selected ?? null;
   }, [answers, lesson, current]);
 
-  const canProceed = !!currentAnswer;
-
+  
   const submit = async () => {
     if (!lesson || !accessToken) return;
     setSubmitting(true);
@@ -202,6 +201,10 @@ export default function QuizPage() {
   const q = lesson.questions[current];
   const pct = Math.round(((current + 1) / lesson.questions.length) * 100);
 
+  const canProceed =
+  !!currentAnswer &&
+  (q.qtype !== "build" ? true : (currentAnswer.text || "").trim().length > 0);
+
   return (
     <Protected>
       <Nav />
@@ -227,6 +230,9 @@ export default function QuizPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* show the prompt */}
+            <div className="mb-4 text-lg font-medium">{q.prompt}</div>
+
             {q.qtype === "mcq" && (
               <RadioGroup
                 value={currentAnswer?.index?.toString() || ""}
