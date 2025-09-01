@@ -1,4 +1,3 @@
-// src/app/quiz/random/page.tsx (or your current path)
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -6,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Protected from "@/components/Protected";
 import Nav from "@/components/Nav";
 import { useAuth } from "@/lib/auth-store";
-import { apiClient } from "@/lib/api";
+import { apiClient } from "@/lib/api"; // <-- only once
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,18 +14,17 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle, Zap } from "lucide-react";
 import {
-  buildSubmitPayload,
+  buildRandomSubmitPayload,
   type UIQuestion,
   type UISelected,
   type McqPayload,
   type BuildPayload,
 } from "@/lib/quizPayload";
 
-type SubmitResult = {
-  score_pct: number;
-  xp_delta: number;
-  results: Array<{ question_id: number; is_correct: boolean }>;
-};
+// local result types:
+type ResultItem = ({ question_id: number } | { qid: number }) & { is_correct: boolean };
+type RandomAttemptResult = { score_pct: number; xp_delta: number; results: ResultItem[] };
+
 
 export default function RandomQuizPage() {
   const router = useRouter();
@@ -38,7 +36,7 @@ export default function RandomQuizPage() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [selections, setSelections] = useState<Record<number, UISelected | undefined>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [result, setResult] = useState<SubmitResult | null>(null);
+  const [result, setResult] = useState<RandomAttemptResult | null>(null)
   const [showResults, setShowResults] = useState(false);
 
   useEffect(() => {
@@ -83,23 +81,24 @@ export default function RandomQuizPage() {
     return false;
   };
 
-  const handleSubmit = async () => {
-    if (!accessToken || !items.length) return;
-    setIsSubmitting(true);
-    setError("");
-    try {
-      // any lesson_id is fine; backend doesn’t use it for mixed quizzes
-      const lessonId = items.find((i) => i.lesson_id)?.lesson_id ?? 0;
-      const payload = buildSubmitPayload(lessonId, items, selections);
-      const r = await apiClient.post("/quiz-attempts/", payload, accessToken);
-      setResult(r as SubmitResult);
-      setShowResults(true);
-    } catch {
-      setError("Failed to submit quiz");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+const handleSubmit = async () => {
+  if (!accessToken || !items.length) return;
+  setIsSubmitting(true);
+  setError("");
+  try {
+    const payload = buildRandomSubmitPayload(items, selections);
+    const r = await apiClient.post("/quiz/random/attempts/", payload, accessToken);
+    setResult(r as RandomAttemptResult);
+    setShowResults(true);
+  } catch {
+    setError("Failed to submit quiz");
+  } finally {
+    setIsSubmitting(false);
+  }
+};
+
+
+
 
   if (isLoading) {
     return (
@@ -171,7 +170,7 @@ export default function RandomQuizPage() {
               <CardContent>
                 <div className="space-y-4">
                   {items.map((q, i) => {
-                    const r = result.results.find((x) => x.question_id === q.id);
+                    const r = result.results.find((x) => ("question_id" in x ? x.question_id : x.qid) === q.id);
                     const isCorrect = !!r?.is_correct;
                     return (
                       <div
@@ -339,7 +338,6 @@ function renderQuestion(
     );
   }
 
-  // fill
   const text = sel?.type === "fill" ? sel.text : "";
   return (
     <div className="space-y-4">

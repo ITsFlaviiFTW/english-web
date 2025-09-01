@@ -1,58 +1,103 @@
-// src/lib/quizPayload.ts
-export type QType = "mcq" | "tf" | "fill" | "build";
+// Normalizes UI selections to the API payload shape for both lesson and random/category.
 
 export type McqPayload = { options: string[] };
-export type TfPayload = Record<string, never>;
-export type FillPayload = { blanks: number };
 export type BuildPayload = { tokens: string[] };
 
-export type UIQuestion =
-  | { id: number; lesson_id?: number; prompt: string; qtype: "mcq"; payload: McqPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "tf"; payload: TfPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "fill"; payload: FillPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "build"; payload: BuildPayload };
-
 export type UISelected =
-  | { type: "mcq"; index: number | null }
+  | { type: "mcq"; index: number }
   | { type: "tf"; value: boolean | null }
   | { type: "fill"; text: string }
-  | { type: "build"; tokens: string[] }; // IMPORTANT: send tokens
+  | { type: "build"; tokens: string[] };
 
-export type SubmitAnswer =
-  | { question_id: number; selected: { index: number } }
-  | { question_id: number; selected: { value: boolean } }
-  | { question_id: number; selected: { text: string } }
-  | { question_id: number; selected: { tokens: string[] } };
-
-export type SubmitPayload = {
-  lesson_id: number;
-  answers: SubmitAnswer[];
+export type UIQuestion = {
+  id: number;              // 1-based question id within the quiz page
+  lesson_id?: number;      // present for random/category API
+  item_index?: number;     // 1-based index within the source lesson (random/category API)
+  prompt: string;
+  qtype: "mcq" | "tf" | "fill" | "build";
+  payload: McqPayload | BuildPayload | Record<string, unknown>;
 };
 
-export function buildSubmitPayload(
+type SelectedPayload =
+  | { index: number }
+  | { value: boolean }
+  | { text: string }
+  | { tokens: string[] };
+
+// ---- LESSON builder ---------------------------------------------------------
+
+export type LessonAttemptAnswer = {
+  question_id: number;       // <-- required by /quiz/attempts/
+  selected: SelectedPayload;
+};
+
+export type LessonAttemptPayload = {
+  lesson_id: number;
+  answers: LessonAttemptAnswer[];
+};
+
+export function buildLessonSubmitPayload(
   lessonId: number,
   questions: UIQuestion[],
-  selections: Record<number, UISelected | undefined> // keyed by question.id (1..N)
-): SubmitPayload {
-  const answers: SubmitAnswer[] = questions.map((q) => {
+  selections: Record<number, UISelected | undefined>
+): LessonAttemptPayload {
+  const answers: LessonAttemptAnswer[] = [];
+
+  questions.forEach((q) => {
     const sel = selections[q.id];
-    if (!sel) {
-      // send empty shell; backend tolerates unanswered
-      return { question_id: q.id, selected: { text: "" } };
-    }
-    if (q.qtype === "mcq" && sel.type === "mcq" && sel.index != null) {
-      return { question_id: q.id, selected: { index: sel.index } };
-    }
-    if (q.qtype === "tf" && sel.type === "tf" && sel.value != null) {
-      return { question_id: q.id, selected: { value: sel.value } };
-    }
-    if (q.qtype === "build" && sel.type === "build") {
-      return { question_id: q.id, selected: { tokens: sel.tokens } };
-    }
-    // fill fallback
-    const text = sel.type === "fill" ? sel.text : "";
-    return { question_id: q.id, selected: { text } };
+    if (!sel) return;
+
+    let selected: SelectedPayload | null = null;
+    if (sel.type === "mcq" && sel.index != null) selected = { index: sel.index };
+    else if (sel.type === "tf" && sel.value != null) selected = { value: sel.value };
+    else if (sel.type === "fill") selected = { text: (sel.text || "").trim() };
+    else if (sel.type === "build") selected = { tokens: (sel.tokens || []).filter(Boolean) };
+
+    if (selected) answers.push({ question_id: q.id, selected });
   });
 
   return { lesson_id: lessonId, answers };
+}
+
+// ---- RANDOM/CATEGORY builder ------------------------------------------------
+
+export type RandomAttemptAnswer = {
+  qid: number;              // UI question id on the mixed quiz page
+  lesson_id: number;        // actual source lesson
+  item_index: number;       // 1-based item index within that lesson
+  selected: SelectedPayload;
+};
+
+export type RandomAttemptPayload = {
+  answers: RandomAttemptAnswer[];
+};
+
+export function buildRandomSubmitPayload(
+  questions: UIQuestion[],
+  selections: Record<number, UISelected | undefined>,
+  fallbackLessonId = 0
+): RandomAttemptPayload {
+  const answers: RandomAttemptAnswer[] = [];
+
+  questions.forEach((q, idx) => {
+    const sel = selections[q.id];
+    if (!sel) return;
+
+    let selected: SelectedPayload | null = null;
+    if (sel.type === "mcq" && sel.index != null) selected = { index: sel.index };
+    else if (sel.type === "tf" && sel.value != null) selected = { value: sel.value };
+    else if (sel.type === "fill") selected = { text: (sel.text || "").trim() };
+    else if (sel.type === "build") selected = { tokens: (sel.tokens || []).filter(Boolean) };
+
+    if (!selected) return;
+
+    answers.push({
+      qid: q.id,
+      lesson_id: q.lesson_id ?? fallbackLessonId,
+      item_index: q.item_index ?? (idx + 1),
+      selected,
+    });
+  });
+
+  return { answers };
 }

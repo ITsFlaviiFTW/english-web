@@ -12,22 +12,11 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useAuth } from "@/lib/auth-store";
 import { apiClient, type LessonDetail, type QuizAttemptResult } from "@/lib/api";
 import { ArrowLeft, CheckCircle, XCircle, Trophy, Zap } from "lucide-react";
+import { buildLessonSubmitPayload, type UIQuestion, type McqPayload, type BuildPayload } from "@/lib/quizPayload";
 
 
-type McqPayload = { options: string[] };
-type TfPayload = Record<string, never>;
-type FillPayload = { blanks: number };
-type BuildPayload = { tokens: string[] };
+type LessonDetailUI = Omit<LessonDetail, "questions"> & { questions: UIQuestion[] };
 
-type QuizItem =
-  | { id: number; lesson_id?: number; prompt: string; qtype: "mcq"; payload: McqPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "tf"; payload: TfPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "fill"; payload: FillPayload }
-  | { id: number; lesson_id?: number; prompt: string; qtype: "build"; payload: BuildPayload };
-
-type LessonDetailUI = Omit<LessonDetail, "questions"> & { questions: QuizItem[] };
-
-// Union type for selected answers
 type UISelected =
   | { type: "mcq"; index: number }
   | { type: "tf"; value: boolean | null }
@@ -36,18 +25,10 @@ type UISelected =
 
 type QuizAnswer = { question_id: number; selected: UISelected | null };
 
-// --- type guards ---
-const isMcq = (s: UISelected | undefined): s is Extract<UISelected, { type: "mcq" }> =>
-  !!s && s.type === "mcq";
-
-const isTf = (s: UISelected | undefined): s is Extract<UISelected, { type: "tf" }> =>
-  !!s && s.type === "tf";
-
-const isFill = (s: UISelected | undefined): s is Extract<UISelected, { type: "fill" }> =>
-  !!s && s.type === "fill";
-
-const isBuild = (s: UISelected | undefined): s is Extract<UISelected, { type: "build" }> =>
-  !!s && s.type === "build";
+const isMcq = (s: UISelected | undefined): s is Extract<UISelected, { type: "mcq" }> => !!s && s.type === "mcq";
+const isTf = (s: UISelected | undefined): s is Extract<UISelected, { type: "tf" }> => !!s && s.type === "tf";
+const isFill = (s: UISelected | undefined): s is Extract<UISelected, { type: "fill" }> => !!s && s.type === "fill";
+const isBuild = (s: UISelected | undefined): s is Extract<UISelected, { type: "build" }> => !!s && s.type === "build";
 
 export default function QuizPage() {
   const router = useRouter();
@@ -68,7 +49,10 @@ export default function QuizPage() {
     (async () => {
       try {
         const data = await apiClient.getLessonDetail(lessonId, accessToken);
-        const ui: LessonDetailUI = { ...(data as LessonDetail), questions: (data.questions as unknown as QuizItem[]) };
+        const ui: LessonDetailUI = {
+          ...(data as LessonDetail),
+          questions: (data.questions as unknown as UIQuestion[]),
+        };
         setLesson(ui);
         setAnswers(ui.questions.map((q) => ({ question_id: q.id, selected: null })));
       } catch {
@@ -83,22 +67,23 @@ export default function QuizPage() {
     setAnswers((prev) => prev.map((a) => (a.question_id === qid ? { ...a, selected } : a)));
   };
 
-  const submit = async () => {
-    if (!lesson || !accessToken) return;
-    setSubmitting(true);
-    try {
-      const payload = {
-        lesson_id: lesson.id,
-        answers: answers.filter((a) => a.selected !== null),
-      };
-      const r = await apiClient.submitQuizAttempt(payload, accessToken);
-      setResult(r);
-    } catch {
-      setError("Failed to submit quiz");
-    } finally {
-      setSubmitting(false);
-    }
-  };
+const submit = async () => {
+  if (!lesson || !accessToken) return;
+  setSubmitting(true);
+  try {
+    const selections = Object.fromEntries(
+      answers.map((a) => [a.question_id, a.selected ?? undefined])
+    );
+    const payload = buildLessonSubmitPayload(lesson.id, lesson.questions, selections);
+    const r = await apiClient.submitQuizAttempt(payload, accessToken);
+    setResult(r);
+  } catch {
+    setError("Failed to submit quiz");
+  } finally {
+    setSubmitting(false);
+  }
+};
+
 
   if (loading) {
     return (
@@ -317,7 +302,7 @@ function TokenBuilder({
   onChange,
 }: {
   tokens: string[];
-  value: string[]; // use array, not string
+  value: string[];
   onChange: (joined: string[]) => void;
 }) {
   const selected = value;

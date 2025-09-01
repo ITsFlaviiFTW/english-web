@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Protected from "@/components/Protected";
 import Nav from "@/components/Nav";
 import { useAuth } from "@/lib/auth-store";
-import { apiClient } from "@/lib/api";
+import { apiClient } from "@/lib/api"; // <-- only once
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,44 +13,33 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle, Zap } from "lucide-react";
+import {
+  buildRandomSubmitPayload,
+  type UIQuestion,
+  type UISelected,
+  type McqPayload,
+  type BuildPayload,
+} from "@/lib/quizPayload";
 
-type McqPayload = { options: string[] };
-type TfPayload = Record<string, never>;
-type FillPayload = { blanks: number };
-type BuildPayload = { tokens: string[] };
 
-type QuizItem =
-  | { id: number; lesson_id?: number; item_index?: number; prompt: string; qtype: "mcq";  payload: McqPayload }
-  | { id: number; lesson_id?: number; item_index?: number; prompt: string; qtype: "tf";   payload: TfPayload }
-  | { id: number; lesson_id?: number; item_index?: number; prompt: string; qtype: "fill"; payload: FillPayload }
-  | { id: number; lesson_id?: number; item_index?: number; prompt: string; qtype: "build";payload: BuildPayload };
+type ResultItem = ({ question_id: number } | { qid: number }) & { is_correct: boolean };
+type CategoryAttemptResult = { score_pct: number; xp_delta: number; results: ResultItem[] };
 
-type AnswerSelection =
-  | { kind: "mcq"; index: number }
-  | { kind: "tf"; value: boolean }
-  | { kind: "fill"; text: string }
-  | { kind: "build"; text: string };
 
-type Answer = { question_id: number; selected: AnswerSelection | null };
-
-type SubmitResult = {
-  score_pct: number;
-  xp_delta: number;
-  results: Array<{ question_id: number; is_correct: boolean }>;
-};
 
 export default function CategoryQuizPage() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const { accessToken } = useAuth();
 
-  const [items, setItems] = useState<QuizItem[]>([]);
+  const [items, setItems] = useState<UIQuestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [answers, setAnswers] = useState<Answer[]>([]);
+  const [selections, setSelections] = useState<Record<number, UISelected | undefined>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [result, setResult] = useState<SubmitResult | null>(null);
+  const [result, setResult] = useState<CategoryAttemptResult | null>(null);
+
   const [showResults, setShowResults] = useState(false);
 
   useEffect(() => {
@@ -60,14 +49,11 @@ export default function CategoryQuizPage() {
       setError("");
       try {
         const data = await apiClient.get(`/quiz/random/?size=10&category_id=${id}`, accessToken);
-        const fetched: QuizItem[] = (data?.items ?? []) as QuizItem[];
+        const fetched: UIQuestion[] = (data?.items ?? []) as UIQuestion[];
         setItems(fetched);
-        setAnswers(
-          fetched.map((q) => ({
-            question_id: q.id,
-            selected: null,
-          })),
-        );
+        const init: Record<number, UISelected | undefined> = {};
+        fetched.forEach((q) => (init[q.id] = undefined));
+        setSelections(init);
       } catch {
         setError("Failed to load category quiz");
       } finally {
@@ -84,55 +70,37 @@ export default function CategoryQuizPage() {
 
   const current = items[currentIdx];
 
-  const getCurrentAnswer = (questionId: number) =>
-    answers.find((a) => a.question_id === questionId)?.selected ?? null;
-
-  const updateAnswer = (questionId: number, selected: AnswerSelection) => {
-    setAnswers((prev) => prev.map((a) => (a.question_id === questionId ? { ...a, selected } : a)));
-  };
+  const setAnswer = (qid: number, sel: UISelected) =>
+    setSelections((prev) => ({ ...prev, [qid]: sel }));
 
   const canProceed = () => {
     if (!current) return false;
-    const sel = getCurrentAnswer(current.id);
-    return sel !== null && sel !== undefined;
+    const sel = selections[current.id];
+    if (!sel) return false;
+    if (sel.type === "mcq") return sel.index != null;
+    if (sel.type === "tf") return sel.value != null;
+    if (sel.type === "fill") return (sel.text || "").trim() !== "";
+    if (sel.type === "build") return sel.tokens.length > 0;
+    return false;
   };
 
-  const handleSubmit = async () => {
-    if (!accessToken || !items.length) return;
-    setIsSubmitting(true);
-    setError("");
-    try {
-      const payload = {
-        answers: answers
-          .filter((a) => a.selected !== null)
-          .map((a) => {
-            const sel = a.selected!;
-            const q = items.find((x) => x.id === a.question_id)!;
+const handleSubmit = async () => {
+  if (!accessToken || !items.length) return;
+  setIsSubmitting(true);
+  setError("");
+  try {
+    const payload = buildRandomSubmitPayload(items, selections);
+    const r = await apiClient.post("/quiz/random/attempts/", payload, accessToken);
+    setResult(r as CategoryAttemptResult);
+    setShowResults(true);
+  } catch {
+    setError("Failed to submit quiz");
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
-            const selected =
-              sel.kind === "mcq"   ? { index: sel.index } :
-              sel.kind === "tf"    ? { value: sel.value } :
-              sel.kind === "build" ? { tokens: sel.text.trim().split(/\s+/) } :
-                                     { text: sel.text };
 
-            return {
-              qid: a.question_id,
-              lesson_id: q.lesson_id!,     // provided by GET /quiz/random/
-              item_index: q.item_index!,   // provided by GET /quiz/random/
-              selected,
-            };
-          }),
-      };
-
-      const r = await apiClient.post("/quiz/random/attempts/", payload, accessToken);
-      setResult(r as SubmitResult);
-      setShowResults(true);
-    } catch {
-      setError("Failed to submit quiz");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   if (isLoading) {
     return (
@@ -204,7 +172,7 @@ export default function CategoryQuizPage() {
               <CardContent>
                 <div className="space-y-4">
                   {items.map((q, i) => {
-                    const r = result.results.find((x) => x.question_id === q.id);
+                    const r = result.results.find((x) => ("question_id" in x ? x.question_id : x.qid) === q.id);
                     const isCorrect = !!r?.is_correct;
                     return (
                       <div
@@ -247,7 +215,9 @@ export default function CategoryQuizPage() {
                   setShowResults(false);
                   setResult(null);
                   setCurrentIdx(0);
-                  setAnswers(items.map((q) => ({ question_id: q.id, selected: null })));
+                  const init: Record<number, UISelected | undefined> = {};
+                  items.forEach((q) => (init[q.id] = undefined));
+                  setSelections(init);
                 }}
               >
                 <RotateCcw className="h-4 w-4" />
@@ -284,7 +254,7 @@ export default function CategoryQuizPage() {
               {current.qtype === "build" && "Tap the tiles to build the sentence"}
             </CardDescription>
           </CardHeader>
-          <CardContent>{renderQuestion(current, getCurrentAnswer, updateAnswer)}</CardContent>
+          <CardContent>{renderQuestion(current, selections[current.id], (sel) => setAnswer(current.id, sel))}</CardContent>
         </Card>
 
         <div className="flex items-center justify-between">
@@ -308,18 +278,16 @@ export default function CategoryQuizPage() {
 }
 
 function renderQuestion(
-  q: QuizItem,
-  getAnswer: (id: number) => AnswerSelection | null,
-  update: (id: number, sel: AnswerSelection) => void,
+  q: UIQuestion,
+  sel: UISelected | undefined,
+  update: (sel: UISelected) => void,
 ) {
-  const sel = getAnswer(q.id);
-
   if (q.qtype === "mcq") {
-    const value = sel?.kind === "mcq" ? String(sel.index) : "";
+    const value = sel?.type === "mcq" && sel.index != null ? String(sel.index) : "";
     return (
       <div className="space-y-4">
         <h3 className="text-lg font-medium">{q.prompt}</h3>
-        <RadioGroup value={value} onValueChange={(v) => update(q.id, { kind: "mcq", index: parseInt(v, 10) })}>
+        <RadioGroup value={value} onValueChange={(v) => update({ type: "mcq", index: parseInt(v, 10) })}>
           {(q.payload as McqPayload).options.map((opt, i) => (
             <div key={i} className="flex items-center space-x-2">
               <RadioGroupItem value={String(i)} id={`opt-${q.id}-${i}`} />
@@ -334,11 +302,11 @@ function renderQuestion(
   }
 
   if (q.qtype === "tf") {
-    const value = sel?.kind === "tf" ? String(sel.value) : "";
+    const value = sel?.type === "tf" && sel.value != null ? String(sel.value) : "";
     return (
       <div className="space-y-4">
         <h3 className="text-lg font-medium">{q.prompt}</h3>
-        <RadioGroup value={value} onValueChange={(v) => update(q.id, { kind: "tf", value: v === "true" })}>
+        <RadioGroup value={value} onValueChange={(v) => update({ type: "tf", value: v === "true" })}>
           <div className="flex items-center space-x-2">
             <RadioGroupItem value="true" id={`true-${q.id}`} />
             <Label htmlFor={`true-${q.id}`} className="cursor-pointer">
@@ -356,36 +324,31 @@ function renderQuestion(
     );
   }
 
-  // --- handle build BEFORE fill ---
   if (q.qtype === "build") {
-    const text = sel?.kind === "build" ? sel.text : "";
+    const tokens = sel?.type === "build" ? sel.tokens : [];
     return (
       <div className="space-y-4">
         <h3 className="text-lg font-medium">{q.prompt}</h3>
         <TokenBuilder
           tokens={(q.payload as BuildPayload).tokens}
-          value={text}
-          onChange={(joined: string) => update(q.id, { kind: "build", text: joined })}
+          value={tokens}
+          onChange={(toks) => update({ type: "build", tokens: toks })}
         />
       </div>
     );
   }
 
-  if (q.qtype === "fill") {
-    const text = sel?.kind === "fill" ? sel.text : "";
-    return (
-      <div className="space-y-4">
-        <h3 className="text-lg font-medium">{q.prompt}</h3>
-        <Input
-          placeholder="Type your answer here..."
-          value={text}
-          onChange={(e) => update(q.id, { kind: "fill", text: e.target.value })}
-        />
-      </div>
-    );
-  }
-
-  return null;
+  const text = sel?.type === "fill" ? sel.text : "";
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-medium">{q.prompt}</h3>
+      <Input
+        placeholder="Type your answer here..."
+        value={text}
+        onChange={(e) => update({ type: "fill", text: e.target.value })}
+      />
+    </div>
+  );
 }
 
 function TokenBuilder({
@@ -394,19 +357,22 @@ function TokenBuilder({
   onChange,
 }: {
   tokens: string[];
-  value: string;
-  onChange: (joined: string) => void;
+  value: string[];
+  onChange: (joined: string[]) => void;
 }) {
-  const selected = value ? value.split(" ") : [];
-  const remaining = tokens.filter(
-    (t) => selected.filter((s) => s === t).length < tokens.filter((x) => x === t).length,
-  );
+  const selected = value;
+  const remaining = tokens.reduce<string[]>((acc, t) => {
+    const used = selected.filter((s) => s === t).length;
+    const total = tokens.filter((x) => x === t).length;
+    if (used < total) acc.push(t);
+    return acc;
+  }, []);
 
-  const add = (t: string) => onChange((value ? value + " " : "") + t);
+  const add = (t: string) => onChange([...selected, t]);
   const removeAt = (i: number) => {
     const next = selected.slice();
     next.splice(i, 1);
-    onChange(next.join(" "));
+    onChange(next);
   };
 
   return (
