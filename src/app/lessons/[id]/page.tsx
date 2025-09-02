@@ -1,73 +1,136 @@
-"use client"
+// src/app/lessons/[id]/page.tsx
+"use client";
 
-import { useEffect, useState } from "react"
-import { useRouter, useParams } from "next/navigation"
-import Protected from "@/components/Protected"
-import Nav from "@/components/Nav"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Slider } from "@/components/ui/slider"
-import { Badge } from "@/components/ui/badge"
-import { useAuth } from "@/lib/auth-store"
-import { apiClient, type LessonDetail } from "@/lib/api"
-import { ArrowLeft, BookOpen, Play, ChevronLeft, ChevronRight, Volume2 } from "lucide-react"
-import ReactMarkdown from "react-markdown"
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useParams } from "next/navigation";
+import Protected from "@/components/Protected";
+import Nav from "@/components/Nav";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { ArrowLeft, Volume2, CheckCircle, ArrowRight } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import { useAuth } from "@/lib/auth-store";
+import { apiClient, type LessonDetail } from "@/lib/api";
+
+type Step =
+  | { id: string; type: "intro" }
+  | { id: string; type: "vocab"; front: string; back: string; audio?: string | null }
+  | { id: string; type: "review" };
 
 export default function LessonPage() {
-  const router = useRouter()
-  const params = useParams()
-  const lessonId = Number(params.id as string)
-  const { accessToken } = useAuth()
+  const router = useRouter();
+  const params = useParams();
+  const lessonId = Number(params.id as string);
+  const { accessToken } = useAuth();
 
-  const [lesson, setLesson] = useState<LessonDetail | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState("")
-  const [currentFlashcard, setCurrentFlashcard] = useState(0)
-  const [isFlipped, setIsFlipped] = useState(false)
-  const [progress, setProgress] = useState([50])
+  const [lesson, setLesson] = useState<LessonDetail | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
 
+  // step state
+  const [steps, setSteps] = useState<Step[]>([]);
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({}); // vocab reveal state
   const [updating, setUpdating] = useState(false);
 
+  // ---- load lesson ----
   useEffect(() => {
-    if (!accessToken || Number.isNaN(lessonId)) return
-    ;(async () => {
+    if (!accessToken || Number.isNaN(lessonId)) return;
+    (async () => {
       try {
-        const data = await apiClient.getLessonDetail(lessonId, accessToken)
-        data.flashcards ||= []
-        data.questions ||= []
-        setLesson(data)
-      } catch (err) {
-        console.error("Failed to load lesson:", err)
-        setError("Failed to load lesson")
+        const data = await apiClient.getLessonDetail(lessonId, accessToken);
+        data.flashcards ||= [];
+        data.questions ||= [];
+        setLesson(data);
+
+        // Build a simple, pedagogically sound step path:
+        // Intro -> vocab (one per flashcard) -> Review
+        const built: Step[] = [{ id: "intro", type: "intro" }];
+        for (const fc of data.flashcards) {
+          built.push({
+            id: `v-${fc.id}`,
+            type: "vocab",
+            front: fc.front_text ?? "",
+            back: fc.back_text ?? "",
+            audio: fc.audio_url ?? null,
+          });
+        }
+        built.push({ id: "review", type: "review" });
+        setSteps(built);
+
+        // init revealed map
+        const initRev: Record<string, boolean> = {};
+        built.forEach((s) => (initRev[s.id] = s.type === "intro")); // intro counts as revealed
+        setRevealed(initRev);
+      } catch (e) {
+        console.error(e);
+        setError("Failed to load lesson");
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
-    })()
-  }, [lessonId, accessToken])
+    })();
+  }, [lessonId, accessToken]);
 
-  const nextFlashcard = () => {
-    if (!lesson || lesson.flashcards.length === 0) return
-    setCurrentFlashcard((prev) => (prev + 1) % lesson.flashcards.length)
-    setIsFlipped(false)
-  }
+  // ---- derived progress ----
+  const totalSteps = steps.length || 1;
+  const completed = useMemo(() => Object.values(revealed).filter(Boolean).length, [revealed]);
+  const progressPct = Math.round((completed / totalSteps) * 100);
 
-  const prevFlashcard = () => {
-    if (!lesson || lesson.flashcards.length === 0) return
-    setCurrentFlashcard((prev) => (prev - 1 + lesson.flashcards.length) % lesson.flashcards.length)
-    setIsFlipped(false)
-  }
+  // ---- persist progress (debounced per completion) ----
+  const persistProgress = async (percent: number) => {
+    if (!lesson || !accessToken) return;
+    try {
+      setUpdating(true);
+      await apiClient.updateProgress({ lesson_id: lesson.id, percent }, accessToken);
+    } catch (e) {
+      console.error("Progress update failed:", e);
+    } finally {
+      setUpdating(false);
+    }
+  };
 
-  const handleProgressUpdate = async () => {
-  if (!lesson || !accessToken) return;
-  try {
-    setUpdating(true);
-    await apiClient.updateProgress({ lesson_id: lesson.id, percent: progress[0] }, accessToken);
-  } catch (e) {
-    console.error("Progress update failed:", e);
-  } finally {
-    setUpdating(false);
-  }
-};
+  // mark current step as done, advance, and persist
+  const completeAndNext = async () => {
+    const step = steps[currentIdx];
+    if (!step) return;
+
+    setRevealed((prev) => ({ ...prev, [step.id]: true }));
+
+    // compute the *new* progress that includes this completion
+    const newlyCompleted = Object.values({ ...revealed, [step.id]: true }).filter(Boolean).length;
+    const nextPct = Math.round((newlyCompleted / totalSteps) * 100);
+    persistProgress(nextPct).catch(() => {});
+
+    // advance
+    setTimeout(() => {
+      setCurrentIdx((i) => Math.min(i + 1, totalSteps - 1));
+    }, 300);
+  };
+
+  // play audio or fall back to TTS
+  const playAudio = (url?: string | null, text?: string) => {
+    if (!url && !text) return;
+    if (url) {
+      const audio = new Audio(url);
+      audio.play().catch(() => {
+        if (text) speak(text);
+      });
+      return;
+    }
+    if (text) speak(text);
+  };
+
+  const speak = (text: string) => {
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "en-US";
+      speechSynthesis.speak(u);
+    } catch {
+      // noop
+    }
+  };
 
   if (isLoading) {
     return (
@@ -77,7 +140,7 @@ export default function LessonPage() {
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>
       </Protected>
-    )
+    );
   }
 
   if (error || !lesson) {
@@ -96,156 +159,161 @@ export default function LessonPage() {
           </Card>
         </div>
       </Protected>
-    )
+    );
   }
 
-  const currentCard = lesson.flashcards[currentFlashcard]
+  const step = steps[currentIdx];
 
   return (
     <Protected>
       <Nav />
-      <main className="container mx-auto px-4 py-8">
-        <div className="flex items-center gap-4 mb-6">
-          <Button variant="ghost" onClick={() => router.back()} className="gap-2">
+      <main className="container mx-auto px-4 py-8 max-w-4xl">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <Button variant="outline" onClick={() => router.back()} className="gap-2">
             <ArrowLeft className="h-4 w-4" />
             Back
           </Button>
-        </div>
-
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-3xl font-bold">{lesson.title}</h2>
-            {lesson.difficulty && <Badge variant="outline">{lesson.difficulty}</Badge>}
+          <div className="text-center">
+            <h1 className="text-2xl font-bold">{lesson.title}</h1>
+            <p className="text-sm text-muted-foreground">
+              {lesson.word_count ? `${lesson.word_count} words • ` : ""}auto-tracked progress
+            </p>
           </div>
-          {lesson.word_count ? (
-            <p className="text-sm text-muted-foreground">{lesson.word_count} words</p>
-          ) : null}
+          <Badge variant="outline" className="text-base px-3 py-1">
+            {currentIdx + 1}/{totalSteps}
+          </Badge>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BookOpen className="h-5 w-5" />
-                  Lesson Content
-                </CardTitle>
-                <CardDescription>Read through the core content</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="prose prose-sm max-w-none">
-                  <ReactMarkdown>{lesson.body_md || ""}</ReactMarkdown>
-                </div>
-              </CardContent>
-            </Card>
+        {/* Progress */}
+        <div className="mb-6">
+          <div className="flex justify-between text-sm mb-2">
+            <span>Lesson progress</span>
+            <span className="font-medium">{progressPct}%</span>
+          </div>
+          <Progress value={progressPct} className="h-2" />
+        </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Mark Your Progress</CardTitle>
-                <CardDescription>How much of this lesson have you completed?</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Progress</span>
-                    <span>{progress[0]}%</span>
+        {/* Step card */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>
+              {step.type === "intro" && "Welcome"}
+              {step.type === "vocab" && "Vocabulary"}
+              {step.type === "review" && "Review & Next"}
+            </CardTitle>
+            <CardDescription>
+              {step.type === "intro" && "Read the overview, then continue to learn each word."}
+              {step.type === "vocab" && "Tap to reveal the translation. Audio available."}
+              {step.type === "review" && "Great work! Take the quiz to reinforce what you learned."}
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="space-y-6">
+            {step.type === "intro" && (
+              <div className="space-y-4">
+                {lesson.body_md ? (
+                  <div className="prose prose-sm max-w-none">
+                    <ReactMarkdown>{lesson.body_md}</ReactMarkdown>
                   </div>
-                  <Slider value={progress} onValueChange={setProgress} max={100} step={10} className="w-full" />
-                </div>
-                <Button onClick={handleProgressUpdate} className="w-full" disabled={updating}>
-                  {updating ? "Updating..." : "Update Progress"}
+                ) : (
+                  <p className="text-muted-foreground">
+                    This lesson introduces key words and simple examples. Continue to learn each word and then take a short quiz.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {step.type === "vocab" && (
+              <div className="text-center space-y-6">
+                <div className="text-5xl font-bold">{step.front}</div>
+
+                <Button
+                  variant="outline"
+                  onClick={() => playAudio(step.audio, step.front)}
+                  className="mx-auto flex items-center gap-2"
+                >
+                  <Volume2 className="h-4 w-4" />
+                  Hear pronunciation
                 </Button>
-              </CardContent>
-            </Card>
-          </div>
 
-          <div className="space-y-6">
-            {lesson.flashcards.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Flashcards</CardTitle>
-                  <CardDescription>
-                    {currentFlashcard + 1} of {lesson.flashcards.length}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div
-                    className="relative h-48 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-lg border-2 border-dashed border-primary/20 cursor-pointer transition-all duration-300 hover:shadow-md"
-                    onClick={() => setIsFlipped((f) => !f)}
-                    role="button"
-                    aria-label="Flip flashcard"
-                  >
-                    <div className="absolute inset-0 flex items-center justify-center p-6">
-                      <div className="text-center">
-                        <p className="text-lg font-medium mb-2">
-                          {isFlipped ? currentCard?.back_text : currentCard?.front_text}
-                        </p>
-                        {currentCard?.audio_url && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="gap-2"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              const a = new Audio(currentCard.audio_url!)
-                              a.play().catch(() => {})
-                            }}
-                          >
-                            <Volume2 className="h-4 w-4" />
-                            Play Audio
-                          </Button>
-                        )}
-                      </div>
-                    </div>
+                {revealed[step.id] ? (
+                  <div className="space-y-2">
+                    <div className="text-3xl font-semibold text-green-600">{step.back}</div>
+                    <div className="text-sm text-muted-foreground">Nice! Move to the next word when you’re ready.</div>
                   </div>
-
-                  <div className="flex items-center justify-between">
-                    <Button
-                      variant="outline"
-                      onClick={prevFlashcard}
-                      disabled={lesson.flashcards.length <= 1}
-                      className="gap-2 bg-transparent"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      Previous
-                    </Button>
-                    <Button onClick={() => setIsFlipped((f) => !f)} variant="ghost">
-                      {isFlipped ? "Show Front" : "Show Back"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={nextFlashcard}
-                      disabled={lesson.flashcards.length <= 1}
-                      className="gap-2 bg-transparent"
-                    >
-                      Next
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-sm text-muted-foreground">What’s the Romanian translation?</div>
+                    <Button onClick={() => setRevealed((r) => ({ ...r, [step.id]: true }))}>Show translation</Button>
                   </div>
-                </CardContent>
-              </Card>
+                )}
+              </div>
             )}
 
-            {lesson.questions.length > 0 && (
-              <Card className="bg-gradient-to-r from-secondary/10 to-primary/10 border-secondary/20">
-                <CardContent className="pt-6">
-                  <div className="text-center">
-                    <h3 className="text-lg font-bold mb-2">Ready for the Quiz?</h3>
-                    <p className="text-muted-foreground mb-4">
-                      Test your knowledge with {lesson.questions.length} questions
-                    </p>
-                    <Button size="lg" onClick={() => router.push(`/quiz/${lesson.id}`)} className="gap-2">
-                      <Play className="h-4 w-4" />
-                      Start Quiz
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+            {step.type === "review" && (
+              <div className="text-center space-y-4">
+                <div className="text-4xl">🎉</div>
+                <p>Great job working through this lesson.</p>
+                <div className="flex gap-3 justify-center">
+                  <Button size="lg" onClick={() => router.push(`/quiz/${lesson.id}`)}>
+                    Start Quiz
+                  </Button>
+                  <Button size="lg" variant="outline" onClick={() => router.push("/dashboard")}>
+                    Back to Dashboard
+                  </Button>
+                </div>
+              </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Footer nav */}
+        {step.type !== "review" && (
+          <div className="flex items-center justify-between">
+            <Button
+              variant="outline"
+              onClick={() => setCurrentIdx((i) => Math.max(0, i - 1))}
+              disabled={currentIdx === 0}
+            >
+              Previous
+            </Button>
+
+            <div className="flex gap-2">
+              {steps.map((s, i) => (
+                <div
+                  key={s.id}
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    i === currentIdx ? "bg-primary" : revealed[s.id] ? "bg-green-600" : "bg-muted"
+                  }`}
+                />
+              ))}
+            </div>
+
+            <Button
+              onClick={completeAndNext}
+              disabled={step.type === "vocab" && !revealed[step.id]} // must reveal before continuing
+            >
+              {revealed[step.id] ? (
+                <>
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Continue
+                </>
+              ) : (
+                <>
+                  Continue
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </>
+              )}
+            </Button>
           </div>
+        )}
+
+        {/* tiny status under nav */}
+        <div className="mt-2 text-xs text-muted-foreground text-right">
+          {updating ? "Saving progress…" : "Progress auto-saved"}
         </div>
       </main>
     </Protected>
-  )
+  );
 }
