@@ -69,4 +69,10 @@
     background-color: color-mix(in oklab, white 12%, transparent);
     border: 1px solid color-mix(in oklab, white 20%, transparent);
   }
+
+  /* Flip-card + 3D helpers */
+  .perspective { perspective: 1000px; }
+  .preserve-3d { transform-style: preserve-3d; }
+  .backface-hidden { backface-visibility: hidden; }
+  .rotate-y-180 { transform: rotateY(180deg); }
 }
