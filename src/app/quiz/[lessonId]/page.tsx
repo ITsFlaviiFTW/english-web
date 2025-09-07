@@ -14,7 +14,6 @@ import { apiClient, type LessonDetail, type QuizAttemptResult } from "@/lib/api"
 import { ArrowLeft, CheckCircle, XCircle, Trophy, Zap } from "lucide-react";
 import { buildLessonSubmitPayload, type UIQuestion, type McqPayload, type BuildPayload } from "@/lib/quizPayload";
 
-
 type LessonDetailUI = Omit<LessonDetail, "questions"> & { questions: UIQuestion[] };
 
 type UISelected =
@@ -56,7 +55,7 @@ export default function QuizPage() {
         setLesson(ui);
         setAnswers(ui.questions.map((q) => ({ question_id: q.id, selected: null })));
       } catch {
-        setError("Failed to load quiz");
+        setError("Nu am putut încărca testul");
       } finally {
         setLoading(false);
       }
@@ -67,23 +66,20 @@ export default function QuizPage() {
     setAnswers((prev) => prev.map((a) => (a.question_id === qid ? { ...a, selected } : a)));
   };
 
-const submit = async () => {
-  if (!lesson || !accessToken) return;
-  setSubmitting(true);
-  try {
-    const selections = Object.fromEntries(
-      answers.map((a) => [a.question_id, a.selected ?? undefined])
-    );
-    const payload = buildLessonSubmitPayload(lesson.id, lesson.questions, selections);
-    const r = await apiClient.submitQuizAttempt(payload, accessToken);
-    setResult(r);
-  } catch {
-    setError("Failed to submit quiz");
-  } finally {
-    setSubmitting(false);
-  }
-};
-
+  const submit = async () => {
+    if (!lesson || !accessToken) return;
+    setSubmitting(true);
+    try {
+      const selections = Object.fromEntries(answers.map((a) => [a.question_id, a.selected ?? undefined]));
+      const payload = buildLessonSubmitPayload(lesson.id, lesson.questions, selections);
+      const r = await apiClient.submitQuizAttempt(payload, accessToken);
+      setResult(r);
+    } catch {
+      setError("Nu am putut trimite testul");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -103,10 +99,10 @@ const submit = async () => {
         <div className="max-w-2xl mx-auto p-6">
           <Card>
             <CardContent className="pt-6 text-center">
-              <p className="text-destructive mb-4">{error || "Quiz not found"}</p>
+              <p className="text-destructive mb-4">{error || "Testul nu a fost găsit"}</p>
               <Button onClick={() => router.back()} className="gap-2">
                 <ArrowLeft className="h-4 w-4" />
-                Go Back
+                Înapoi
               </Button>
             </CardContent>
           </Card>
@@ -124,11 +120,11 @@ const submit = async () => {
           <Card className="bg-gradient-to-r from-primary/10 to-secondary/10 border-primary/20">
             <CardContent className="pt-6 text-center">
               <Trophy className="h-16 w-16 text-primary mx-auto mb-4" />
-              <h2 className="text-3xl font-bold mb-2">Quiz Complete!</h2>
+              <h2 className="text-3xl font-bold mb-2">Test finalizat!</h2>
               <div className="grid grid-cols-3 gap-4 mt-4">
                 <div>
                   <div className="text-2xl font-bold">{result.score_pct}%</div>
-                  <div className="text-sm text-muted-foreground">Score</div>
+                  <div className="text-sm text-muted-foreground">Scor</div>
                 </div>
                 <div>
                   <div className="text-2xl font-bold flex items-center justify-center gap-1">
@@ -140,7 +136,7 @@ const submit = async () => {
                   <div className="text-2xl font-bold">
                     {correct}/{result.results.length}
                   </div>
-                  <div className="text-sm text-muted-foreground">Correct</div>
+                  <div className="text-sm text-muted-foreground">Răspunsuri corecte</div>
                 </div>
               </div>
             </CardContent>
@@ -148,8 +144,8 @@ const submit = async () => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Question Results</CardTitle>
-              <CardDescription>Review your answers</CardDescription>
+              <CardTitle>Rezultatele pe întrebare</CardTitle>
+              <CardDescription>Revizuiește răspunsurile</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {lesson.questions.map((q, idx) => {
@@ -170,9 +166,9 @@ const submit = async () => {
                       )}
                       <div className="flex-1">
                         <div className="font-medium">
-                          Question {idx + 1}: {q.prompt}
+                          Întrebarea {idx + 1}: {q.prompt}
                         </div>
-                        <Badge variant={ok ? "default" : "destructive"}>{ok ? "Correct" : "Incorrect"}</Badge>
+                        <Badge variant={ok ? "default" : "destructive"}>{ok ? "Corect" : "Incorect"}</Badge>
                       </div>
                     </div>
                   </div>
@@ -184,9 +180,9 @@ const submit = async () => {
           <div className="flex gap-3 justify-center">
             <Button variant="outline" onClick={() => router.push(`/lessons/${lesson.id}`)}>
               <ArrowLeft className="h-4 w-4" />
-              Back to Lesson
+              Înapoi la lecție
             </Button>
-            <Button onClick={() => router.push("/dashboard")}>Back to Dashboard</Button>
+            <Button onClick={() => router.push("/dashboard")}>Înapoi la panou</Button>
           </div>
         </div>
       </Protected>
@@ -196,7 +192,6 @@ const submit = async () => {
   const q = lesson.questions[current];
   const pct = Math.round(((current + 1) / lesson.questions.length) * 100);
   const sel = answers.find((a) => a.question_id === q.id)?.selected ?? undefined;
-
   const canProceed = !!sel && (q.qtype === "build" ? (isBuild(sel) && sel.tokens.length > 0) : true);
 
   return (
@@ -206,7 +201,7 @@ const submit = async () => {
         <div className="flex items-center justify-between mb-4">
           <Button variant="ghost" onClick={() => router.push(`/lessons/${lesson.id}`)} className="gap-2">
             <ArrowLeft className="h-4 w-4" />
-            Back to Lesson
+            Înapoi la lecție
           </Button>
           <Badge variant="outline">
             {current + 1} / {lesson.questions.length}
@@ -215,12 +210,12 @@ const submit = async () => {
 
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>Question {current + 1}</CardTitle>
+            <CardTitle>Întrebarea {current + 1}</CardTitle>
             <CardDescription>
-              {q.qtype === "mcq" && "Choose the correct answer"}
-              {q.qtype === "tf" && "Select true or false"}
-              {q.qtype === "fill" && "Fill in the blank"}
-              {q.qtype === "build" && "Tap the tiles to build the sentence"}
+              {q.qtype === "mcq" && "Alege varianta corectă"}
+              {q.qtype === "tf" && "Alege adevărat sau fals"}
+              {q.qtype === "fill" && "Completează spațiul liber"}
+              {q.qtype === "build" && "Atinge blocurile pentru a forma propoziția"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -247,11 +242,11 @@ const submit = async () => {
               >
                 <label className="flex items-center gap-2 cursor-pointer">
                   <RadioGroupItem value="true" />
-                  <span>True</span>
+                  <span>Adevărat</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <RadioGroupItem value="false" />
-                  <span>False</span>
+                  <span>Fals</span>
                 </label>
               </RadioGroup>
             )}
@@ -266,7 +261,7 @@ const submit = async () => {
 
             {q.qtype === "fill" && (
               <Input
-                placeholder="Type your answer…"
+                placeholder="Scrie răspunsul…"
                 value={isFill(sel) ? sel.text : ""}
                 onChange={(e) => setAnswer(q.id, { type: "fill", text: e.target.value })}
               />
@@ -276,17 +271,17 @@ const submit = async () => {
 
         <div className="flex items-center justify-between">
           <Button variant="outline" disabled={current === 0} onClick={() => setCurrent((v) => Math.max(0, v - 1))}>
-            Previous
+            Înapoi
           </Button>
           <div className="flex items-center gap-4">
             <div className="text-sm text-muted-foreground">{pct}%</div>
             {current === lesson.questions.length - 1 ? (
               <Button disabled={!canProceed || submitting} onClick={submit}>
-                {submitting ? "Submitting..." : "Submit Quiz"}
+                {submitting ? "Se trimite..." : "Trimite testul"}
               </Button>
             ) : (
               <Button disabled={!canProceed} onClick={() => setCurrent((v) => v + 1)}>
-                Next
+                Înainte
               </Button>
             )}
           </div>
@@ -333,7 +328,7 @@ function TokenBuilder({
       </div>
       <div className="min-h-12 p-3 rounded-md border bg-muted/30">
         {selected.length === 0 ? (
-          <span className="text-muted-foreground text-sm">Tap tiles above to build your answer…</span>
+          <span className="text-muted-foreground text-sm">Atinge blocurile de mai sus pentru a construi răspunsul…</span>
         ) : (
           <div className="flex flex-wrap gap-2">
             {selected.map((t, i) => (
@@ -342,7 +337,7 @@ function TokenBuilder({
                 type="button"
                 className="px-3 py-2 rounded-md border bg-background hover:bg-destructive/10"
                 onClick={() => removeAt(i)}
-                title="Remove token"
+                title="Elimină blocul"
               >
                 {t}
               </button>

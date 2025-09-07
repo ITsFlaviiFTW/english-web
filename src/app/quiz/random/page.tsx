@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Protected from "@/components/Protected";
 import Nav from "@/components/Nav";
 import { useAuth } from "@/lib/auth-store";
-import { apiClient } from "@/lib/api"; // <-- only once
+import { apiClient } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,10 +21,8 @@ import {
   type BuildPayload,
 } from "@/lib/quizPayload";
 
-// local result types:
 type ResultItem = ({ question_id: number } | { qid: number }) & { is_correct: boolean };
 type RandomAttemptResult = { score_pct: number; xp_delta: number; results: ResultItem[] };
-
 
 export default function RandomQuizPage() {
   const router = useRouter();
@@ -36,7 +34,7 @@ export default function RandomQuizPage() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [selections, setSelections] = useState<Record<number, UISelected | undefined>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [result, setResult] = useState<RandomAttemptResult | null>(null)
+  const [result, setResult] = useState<RandomAttemptResult | null>(null);
   const [showResults, setShowResults] = useState(false);
 
   useEffect(() => {
@@ -46,13 +44,13 @@ export default function RandomQuizPage() {
       setError("");
       try {
         const data = await apiClient.get(`/quiz/random/?size=10`, accessToken);
-        const fetched: UIQuestion[] = (data?.items ?? []) as UIQuestion[];
+        const fetched: UIQuestion[] = (data as { items?: UIQuestion[] })?.items ?? [];
         setItems(fetched);
         const init: Record<number, UISelected | undefined> = {};
         fetched.forEach((q) => (init[q.id] = undefined));
         setSelections(init);
       } catch {
-        setError("Failed to load random quiz");
+        setError("Nu am putut încărca testul aleator");
       } finally {
         setIsLoading(false);
       }
@@ -67,8 +65,7 @@ export default function RandomQuizPage() {
 
   const current = items[currentIdx];
 
-  const setAnswer = (qid: number, sel: UISelected) =>
-    setSelections((prev) => ({ ...prev, [qid]: sel }));
+  const setAnswer = (qid: number, sel: UISelected) => setSelections((prev) => ({ ...prev, [qid]: sel }));
 
   const canProceed = () => {
     if (!current) return false;
@@ -81,24 +78,21 @@ export default function RandomQuizPage() {
     return false;
   };
 
-const handleSubmit = async () => {
-  if (!accessToken || !items.length) return;
-  setIsSubmitting(true);
-  setError("");
-  try {
-    const payload = buildRandomSubmitPayload(items, selections);
-    const r = await apiClient.post("/quiz/random/attempts/", payload, accessToken);
-    setResult(r as RandomAttemptResult);
-    setShowResults(true);
-  } catch {
-    setError("Failed to submit quiz");
-  } finally {
-    setIsSubmitting(false);
-  }
-};
-
-
-
+  const handleSubmit = async () => {
+    if (!accessToken || !items.length) return;
+    setIsSubmitting(true);
+    setError("");
+    try {
+      const payload = buildRandomSubmitPayload(items, selections);
+      const r = await apiClient.post("/quiz/random/attempts/", payload, accessToken);
+      setResult(r as RandomAttemptResult);
+      setShowResults(true);
+    } catch {
+      setError("Nu am putut trimite testul");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -118,10 +112,10 @@ const handleSubmit = async () => {
         <div className="max-w-2xl mx-auto p-6">
           <Card>
             <CardContent className="pt-6 text-center">
-              <p className="text-destructive mb-4">{error || "No quiz items available"}</p>
+              <p className="text-destructive mb-4">{error || "Nu există întrebări disponibile"}</p>
               <Button onClick={() => router.back()} className="gap-2">
                 <ArrowLeft className="h-4 w-4" />
-                Go Back
+                Înapoi
               </Button>
             </CardContent>
           </Card>
@@ -140,23 +134,23 @@ const handleSubmit = async () => {
             <Card className="mb-8 bg-gradient-to-r from-primary/10 to-secondary/10 border-primary/20">
               <CardContent className="pt-6 text-center">
                 <Trophy className="h-16 w-16 text-primary mx-auto mb-4" />
-                <h2 className="text-3xl font-bold mb-2">Quiz Complete!</h2>
+                <h2 className="text-3xl font-bold mb-2">Test finalizat!</h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-6">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-primary">{result.score_pct}%</div>
-                    <div className="text-sm text-muted-foreground">Score</div>
+                    <div className="text-sm text-muted-foreground">Scor</div>
                   </div>
                   <div className="text-center">
                     <div className="text-2xl font-bold flex items-center justify-center gap-1">
                       <Zap className="h-5 w-5" />+{result.xp_delta}
                     </div>
-                    <div className="text-sm text-muted-foreground">XP Gained</div>
+                    <div className="text-sm text-muted-foreground">XP obținut</div>
                   </div>
                   <div className="text-center">
                     <div className="text-2xl font-bold">
                       {correct}/{result.results.length}
                     </div>
-                    <div className="text-sm text-muted-foreground">Correct</div>
+                    <div className="text-sm text-muted-foreground">Corecte</div>
                   </div>
                 </div>
               </CardContent>
@@ -164,8 +158,8 @@ const handleSubmit = async () => {
 
             <Card>
               <CardHeader>
-                <CardTitle>Question Results</CardTitle>
-                <CardDescription>Review your answers</CardDescription>
+                <CardTitle>Rezultatele pe întrebare</CardTitle>
+                <CardDescription>Revizuiește răspunsurile</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
@@ -187,10 +181,10 @@ const handleSubmit = async () => {
                           )}
                           <div className="flex-1">
                             <p className="font-medium mb-1">
-                              Question {i + 1}: {q.prompt}
+                              Întrebarea {i + 1}: {q.prompt}
                             </p>
                             <Badge variant={isCorrect ? "default" : "destructive"}>
-                              {isCorrect ? "Correct" : "Incorrect"}
+                              {isCorrect ? "Corect" : "Incorect"}
                             </Badge>
                           </div>
                         </div>
@@ -203,8 +197,7 @@ const handleSubmit = async () => {
 
             <div className="flex gap-3 justify-center mt-6">
               <Button onClick={() => router.push("/dashboard")} className="gap-2">
-                <Trophy className="h-4 w-4" />
-                Back to Dashboard
+                Înapoi la panou
               </Button>
               <Button
                 variant="outline"
@@ -219,7 +212,7 @@ const handleSubmit = async () => {
                 }}
               >
                 <RotateCcw className="h-4 w-4" />
-                Retake
+                Reia testul
               </Button>
             </div>
           </div>
@@ -233,7 +226,7 @@ const handleSubmit = async () => {
       <Nav />
       <main className="container mx-auto px-4 py-8 max-w-2xl">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-2xl font-bold">Random Quiz</h2>
+          <h2 className="text-2xl font-bold">Test aleator</h2>
           <Badge variant="outline">
             {currentIdx + 1} / {total}
           </Badge>
@@ -244,12 +237,12 @@ const handleSubmit = async () => {
 
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>Question {currentIdx + 1}</CardTitle>
+            <CardTitle>Întrebarea {currentIdx + 1}</CardTitle>
             <CardDescription>
-              {current.qtype === "mcq" && "Choose the correct answer"}
-              {current.qtype === "tf" && "Select true or false"}
-              {current.qtype === "fill" && "Fill in the blank"}
-              {current.qtype === "build" && "Tap the tiles to build the sentence"}
+              {current.qtype === "mcq" && "Alege varianta corectă"}
+              {current.qtype === "tf" && "Alege adevărat sau fals"}
+              {current.qtype === "fill" && "Completează spațiul liber"}
+              {current.qtype === "build" && "Atinge blocurile pentru a forma propoziția"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -259,16 +252,16 @@ const handleSubmit = async () => {
 
         <div className="flex items-center justify-between">
           <Button onClick={() => setCurrentIdx((i) => Math.max(0, i - 1))} disabled={currentIdx === 0} variant="outline">
-            Previous
+            Înapoi
           </Button>
 
           {currentIdx === total - 1 ? (
             <Button onClick={handleSubmit} disabled={!canProceed() || isSubmitting}>
-              {isSubmitting ? "Submitting..." : "Submit Quiz"}
+              {isSubmitting ? "Se trimite..." : "Trimite testul"}
             </Button>
           ) : (
             <Button onClick={() => setCurrentIdx((i) => i + 1)} disabled={!canProceed()}>
-              Next
+              Înainte
             </Button>
           )}
         </div>
@@ -277,11 +270,7 @@ const handleSubmit = async () => {
   );
 }
 
-function renderQuestion(
-  q: UIQuestion,
-  sel: UISelected | undefined,
-  update: (sel: UISelected) => void
-) {
+function renderQuestion(q: UIQuestion, sel: UISelected | undefined, update: (sel: UISelected) => void) {
   if (q.qtype === "mcq") {
     const value = sel?.type === "mcq" && sel.index != null ? String(sel.index) : "";
     return (
@@ -310,13 +299,13 @@ function renderQuestion(
           <div className="flex items-center space-x-2">
             <RadioGroupItem value="true" id={`true-${q.id}`} />
             <Label htmlFor={`true-${q.id}`} className="cursor-pointer">
-              True
+              Adevărat
             </Label>
           </div>
           <div className="flex items-center space-x-2">
             <RadioGroupItem value="false" id={`false-${q.id}`} />
             <Label htmlFor={`false-${q.id}`} className="cursor-pointer">
-              False
+              Fals
             </Label>
           </div>
         </RadioGroup>
@@ -342,7 +331,7 @@ function renderQuestion(
   return (
     <div className="space-y-4">
       <h3 className="text-lg font-medium">{q.prompt}</h3>
-      <Input placeholder="Type your answer here..." value={text} onChange={(e) => update({ type: "fill", text: e.target.value })} />
+      <Input placeholder="Scrie răspunsul aici..." value={text} onChange={(e) => update({ type: "fill", text: e.target.value })} />
     </div>
   );
 }
@@ -387,7 +376,7 @@ function TokenBuilder({
       </div>
       <div className="min-h-12 p-3 rounded-md border bg-muted/30">
         {selected.length === 0 ? (
-          <span className="text-muted-foreground text-sm">Tap tiles above to build your answer…</span>
+          <span className="text-muted-foreground text-sm">Atinge blocurile de mai sus pentru a construi răspunsul…</span>
         ) : (
           <div className="flex flex-wrap gap-2">
             {selected.map((t, i) => (
@@ -396,7 +385,7 @@ function TokenBuilder({
                 type="button"
                 className="px-3 py-2 rounded-md border bg-background hover:bg-destructive/10"
                 onClick={() => removeAt(i)}
-                title="Remove token"
+                title="Elimină blocul"
               >
                 {t}
               </button>
