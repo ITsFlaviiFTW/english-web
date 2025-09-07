@@ -407,18 +407,31 @@ export default function LessonPage() {
                 )}
               </div>
             )}
-
             {p.kind === "teach" && (
               <div className="mx-auto max-w-xl">
                 <div
+                  key={p.id}  // force remount when the page (word) changes
                   className="group perspective h-56 cursor-pointer select-none"
                   onClick={() => setRevealedTeach((r) => ({ ...r, [p.id]: true }))}
                 >
-                  <div className={["relative h-full w-full rounded-2xl border transition-transform duration-500 preserve-3d", revealedTeach[p.id] ? "rotate-y-180" : ""].join(" ")}>
+                  <div
+                    className={[
+                      "relative h-full w-full rounded-2xl border transition-transform duration-500 preserve-3d",
+                      revealedTeach[p.id] ? "rotate-y-180" : "",
+                    ].join(" ")}
+                  >
+                    {/* FRONT */}
                     <div className="absolute inset-0 backface-hidden flex items-center justify-center rounded-2xl bg-card">
                       <span className="text-5xl font-bold tracking-tight">{p.item.front}</span>
                     </div>
-                    <div className="absolute inset-0 backface-hidden rotate-y-180 flex items-center justify-center rounded-2xl bg-card">
+
+                    {/* BACK (hidden until revealed to prevent flash) */}
+                    <div
+                      className={[
+                        "absolute inset-0 backface-hidden rotate-y-180 flex items-center justify-center rounded-2xl bg-card",
+                        revealedTeach[p.id] ? "" : "opacity-0 pointer-events-none",
+                      ].join(" ")}
+                    >
                       <span className="text-4xl font-semibold text-green-500">{p.item.back}</span>
                     </div>
                   </div>
